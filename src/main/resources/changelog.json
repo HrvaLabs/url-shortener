@@ -26,7 +26,7 @@
             "Blocklists has three new kinds, Shorteners, Domain endings and Brand sites, and a new action, Adds a reason. Shorteners and Domain endings lists go only with Adds a reason, Brand sites lists only with Brands' own sites, and the form offers just the actions that fit the kind. HaGeZi URL shorteners was changed to a Shorteners list and no longer flags links.",
             "Site settings has a new setting under Safety, \"Brands' own sites: top sites\" (150,000 by default, 1,000 to 1,000,000). A new number takes effect at the next refresh of Tranco brand sites or with Refresh now.",
             "While the Tranco brand sites list has no good copy, is off or can't be read, a site named after a brand on a normal ending still counts as that brand's own, so it isn't flagged as an imitation.",
-            "Every night, after the nightly batch of 500 links due their weekly re-check, up to 500 links that go through another shortener whose last redirect check is over a day old are followed again, oldest first. If more are due, the rest wait for the next night."
+            "Every night, after the nightly batch of 500 links due their weekly re-check, up to 500 links that go through another shortener whose last redirect check is over a day old are followed again, oldest first. If more are due, the rest wait for the next night. Links made before this update join that nightly re-check after their next regular check, within a week."
           ]
         }
       ]

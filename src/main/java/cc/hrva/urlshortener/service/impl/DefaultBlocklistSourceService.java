@@ -244,13 +244,14 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
     }
 
     private static void validateAction(final SourceKind kind, final BlocklistAction action) {
-        switch (kind) {
-            case TOP_SITES -> require(action == BlocklistAction.TRUST, "Top sites lists can only mark real sign-in pages");
-            case BRAND_SITES -> require(action == BlocklistAction.TRUST, "Brand sites lists can only mark brands' own sites");
-            case SHORTENERS, ENDINGS -> require(action == BlocklistAction.NOTE, "Shortener and ending lists can only add a reason");
-            case DOMAINS, LINKS -> require(action == BlocklistAction.BLOCK || action == BlocklistAction.FLAG,
-                    "Domain and link lists can only block links or send them to review");
-        }
+        final var invalid = switch (kind) {
+            case TOP_SITES -> action != BlocklistAction.TRUST ? "Top sites lists can only mark real sign-in pages" : null;
+            case BRAND_SITES -> action != BlocklistAction.TRUST ? "Brand sites lists can only mark brands' own sites" : null;
+            case SHORTENERS, ENDINGS -> action != BlocklistAction.NOTE ? "Shortener and ending lists can only add a reason" : null;
+            case DOMAINS, LINKS -> action != BlocklistAction.BLOCK && action != BlocklistAction.FLAG
+                    ? "Domain and link lists can only block links or send them to review" : null;
+        };
+        require(invalid == null, invalid);
     }
 
     private static void require(final boolean valid, final String message) {

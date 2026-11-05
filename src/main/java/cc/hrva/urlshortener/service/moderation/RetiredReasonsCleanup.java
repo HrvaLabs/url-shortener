@@ -20,7 +20,7 @@ public class RetiredReasonsCleanup {
             final var closed = reviewQueueService.resolveOpenWithOnlyRetiredReasons();
             log.info("Closed {} reviews whose reasons no longer decide anything", closed);
         } catch (final RuntimeException exception) {
-            log.warn("Closing reviews with retired reasons failed exception={}", exception.getClass().getName());
+            log.warn("Closing reviews with retired reasons failed exception={}", exception.getClass().getName(), exception);
         }
     }
 
