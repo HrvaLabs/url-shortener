@@ -14,7 +14,7 @@
             "Links from accounts are now checked for pages that ask for a password, a username or ID number, or a card number, as some links made without an account already were. hrva.cc's server opens the destination page once when a link is made (on the website, with an API key, in bulk or through the AI connector), gets a new destination or is turned back on. If the page asks for one of these, an admin checks the link, and the link can be put on hold until then. If the page can't be read, the link stays as it is.",
             "On links from accounts, a sign-in page on one of the most-visited sites, such as Google's or Microsoft's own sign-in after a link to a private document, doesn't count. hrva.cc tells them apart with the Tranco list of the most-visited sites, which it downloads once a day.",
             "A link on hold shows Being checked in My URLs, and visitors are told it is being checked. The bio page editor shows its button as Waiting for review. You can't turn it back on or change where it points until the check is done; the edit form says \"This link is being checked. It comes back on its own if it looks fine.\" If the admin finds it fine, it comes back on by itself. The help page on short links and the security page say so.",
-            "When an admin blocks a link that was on hold, you get the email about a blocked link, as for any other block. Nothing is emailed when a link is put on hold or comes back on."
+            "When an admin blocks a link that was on hold, you get the email about a blocked link, as for any other block, unless your whole account is blocked. Nothing is emailed when a link is put on hold or comes back on."
           ]
         },
         {

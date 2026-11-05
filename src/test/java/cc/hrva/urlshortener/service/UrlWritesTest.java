@@ -50,6 +50,7 @@ import cc.hrva.urlshortener.service.impl.DefaultUrlService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import cc.hrva.urlshortener.service.linksignal.AnonymousLinkSignalsTestConfiguration;
 import cc.hrva.urlshortener.service.settings.DefaultSettingsTestConfiguration;
+import cc.hrva.urlshortener.util.ReviewReasons;
 import cc.hrva.urlshortener.validator.ApiKeyValidator;
 import cc.hrva.urlshortener.validator.UrlValidator;
 import java.sql.SQLException;
@@ -114,6 +115,9 @@ class UrlWritesTest {
     private static final long ON_HRVA = 781L;
     private static final long ON_DOMAIN = 782L;
     private static final long DOMAIN_OWNER = 783L;
+    private static final long LINK_OWNER = 784L;
+    private static final String SIGN_IN_PAGE = "https://verniqindexone.com/cache-trash/";
+    private static final LocalDateTime FLAGGED_AT = LocalDateTime.of(2026, 11, 2, 10, 0);
     private static final ClickRequest CLICK = ClickRequest.of("203.0.113.7", "Mozilla/5.0", null, "HR");
 
     private final AtomicBoolean visitDone = new AtomicBoolean();
@@ -232,7 +236,7 @@ class UrlWritesTest {
         jdbcTemplate.update("delete from link_review where url_id in (?, ?, ?)", LINK, ON_HRVA, ON_DOMAIN);
         jdbcTemplate.update("delete from url where id in (?, ?, ?)", LINK, ON_HRVA, ON_DOMAIN);
         jdbcTemplate.update("delete from custom_domain where owner_id = ?", DOMAIN_OWNER);
-        jdbcTemplate.update("delete from user_account where id = ?", DOMAIN_OWNER);
+        jdbcTemplate.update("delete from user_account where id in (?, ?)", DOMAIN_OWNER, LINK_OWNER);
     }
 
     @Test
@@ -437,6 +441,61 @@ class UrlWritesTest {
     }
 
     @Test
+    void aFreshOwnedLinkIsHeldWithAnOpenReview() {
+        when(cacheManager.getCache("urls")).thenReturn(new ConcurrentMapCache("urls"));
+        ownedSignInPage();
+
+        assertThat(moderationService.holdOwnedLinkForSignInForm(ON_HRVA, SIGN_IN_PAGE, "a password field", ReviewReasons.SIGN_IN_FORM_NEW_ACCOUNT))
+                .isTrue();
+
+        assertThat(holdRow()).containsEntry("ACTIVE", false).containsEntry("BLOCK_REASON", "SIGN_IN_FORM");
+        assertThat(reviewRows()).singleElement().satisfies(review -> assertThat(review)
+                .containsEntry("REASONS", ReviewReasons.SIGN_IN_FORM_NEW_ACCOUNT)
+                .containsEntry("RESOLVED_AT", null)
+                .containsEntry("SYSTEM_FLAGGED", true)
+                .containsEntry("NOTICE", false)
+                .containsEntry("CHECKED_URL", SIGN_IN_PAGE));
+    }
+
+    @Test
+    void anOkForTheSameDestinationIsNotHeldAgain() {
+        when(cacheManager.getCache("urls")).thenReturn(new ConcurrentMapCache("urls"));
+        ownedSignInPage();
+        jdbcTemplate.update("""
+                insert into link_review (url_id, reasons, flagged_at, resolved_at, resolved_by, resolution, system_flagged, notice, checked_url)
+                values (?, ?, ?, ?, 'admin@hrva.cc', 'OK', true, false, ?)""",
+                ON_HRVA, ReviewReasons.SIGN_IN_FORM_NEW_ACCOUNT, FLAGGED_AT, FLAGGED_AT.plusHours(1), SIGN_IN_PAGE);
+
+        assertThat(moderationService.holdOwnedLinkForSignInForm(ON_HRVA, SIGN_IN_PAGE, "a password field", ReviewReasons.SIGN_IN_FORM_NEW_ACCOUNT))
+                .isFalse();
+
+        assertThat(holdRow()).containsEntry("ACTIVE", true).containsEntry("BLOCK_REASON", null);
+        assertThat(reviewRows()).singleElement().satisfies(review -> assertThat(review)
+                .containsEntry("RESOLUTION", "OK")
+                .containsEntry("RESOLVED_AT", Timestamp.valueOf(FLAGGED_AT.plusHours(1))));
+    }
+
+    @Test
+    void anOpenNoticeIsHeldAndBecomesAFlag() {
+        when(cacheManager.getCache("urls")).thenReturn(new ConcurrentMapCache("urls"));
+        ownedSignInPage();
+        jdbcTemplate.update("""
+                insert into link_review (url_id, reasons, flagged_at, system_flagged, notice, checked_url)
+                values (?, ?, ?, true, true, ?)""", ON_HRVA, ReviewReasons.SIGN_IN_FORM_ACCOUNT, FLAGGED_AT, SIGN_IN_PAGE);
+        final var notice = jdbcTemplate.queryForObject("select id from link_review where url_id = ?", Long.class, ON_HRVA);
+
+        assertThat(moderationService.holdOwnedLinkForSignInForm(ON_HRVA, SIGN_IN_PAGE, "a password field", ReviewReasons.SIGN_IN_FORM_NEW_ACCOUNT))
+                .isTrue();
+
+        assertThat(holdRow()).containsEntry("ACTIVE", false).containsEntry("BLOCK_REASON", "SIGN_IN_FORM");
+        assertThat(reviewRows()).singleElement().satisfies(review -> assertThat(review)
+                .containsEntry("ID", notice)
+                .containsEntry("RESOLVED_AT", null)
+                .containsEntry("SYSTEM_FLAGGED", true)
+                .containsEntry("NOTICE", false));
+    }
+
+    @Test
     void anEditKeepsAClickAndTheVisitLimitStopThatLandedAfterTheReRead() {
         link(4, 5L);
         visitMeanwhile = () -> {
@@ -576,6 +635,23 @@ class UrlWritesTest {
         jdbcTemplate.update("""
                 insert into url (id, long_url, short_url, visits, create_date, active, domain_id)
                 values (?, ?, 'menu', 0, ?, true, ?)""", id, longUrl, LocalDateTime.of(2026, 10, 1, 9, 0), domainId);
+    }
+
+    private void ownedSignInPage() {
+        jdbcTemplate.update("insert into user_account (id, email, password, active, create_date) values (?, 'link-owner@hrva.cc', 'hash', true, ?)",
+                LINK_OWNER, LocalDateTime.of(2026, 11, 1, 9, 0));
+        jdbcTemplate.update("""
+                insert into url (id, long_url, short_url, visits, create_date, active, owner_id)
+                values (?, ?, 'menu', 0, ?, true, ?)""", ON_HRVA, SIGN_IN_PAGE, LocalDateTime.of(2026, 11, 1, 9, 5), LINK_OWNER);
+    }
+
+    private Map<String, Object> holdRow() {
+        return jdbcTemplate.queryForMap("select active, block_reason from url where id = ?", ON_HRVA);
+    }
+
+    private List<Map<String, Object>> reviewRows() {
+        return jdbcTemplate.queryForList("select id, reasons, resolved_at, resolution, system_flagged, notice, checked_url from link_review where url_id = ?",
+                ON_HRVA);
     }
 
     private void markDead() {
