@@ -191,6 +191,33 @@ class PublicHttpFetcherTest {
     }
 
     @Test
+    void aFetchThatFollowsRedirectsReportsTheLastUrl() throws IOException {
+        respond("/moved", exchange -> redirect(exchange, "/password"));
+        respond("/password", exchange -> send(exchange, 200, "form"));
+
+        final var result = permissiveFetcher.fetch(baseUrl + "/moved", 100, null, null, TIMEOUT);
+
+        try {
+            assertThat(result.finalUrl()).isEqualTo(baseUrl + "/password");
+        } finally {
+            Files.deleteIfExists(result.body());
+        }
+    }
+
+    @Test
+    void aFetchWithoutRedirectsReportsTheRequestedUrl() throws IOException {
+        respond("/page", exchange -> send(exchange, 200, "form"));
+
+        final var result = permissiveFetcher.fetch(baseUrl + "/page", 100, null, null, TIMEOUT);
+
+        try {
+            assertThat(result.finalUrl()).isEqualTo(baseUrl + "/page");
+        } finally {
+            Files.deleteIfExists(result.body());
+        }
+    }
+
+    @Test
     void notModifiedWhenTheServerMatchesTheValidatorsSentVerbatim() {
         respond("/list", exchange -> {
             final var headers = exchange.getRequestHeaders();

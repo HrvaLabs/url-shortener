@@ -191,7 +191,7 @@ class DefaultLinkPreviewServiceLimitsTest {
             try {
                 final var body = Files.createTempFile("preview-", ".html");
                 Files.writeString(body, PAGE);
-                return new FetchResult(false, body, null, null);
+                return new FetchResult(false, body, null, null, url);
             } catch (final IOException exception) {
                 throw new UncheckedIOException(exception);
             }

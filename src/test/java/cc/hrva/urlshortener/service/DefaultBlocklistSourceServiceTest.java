@@ -1313,12 +1313,12 @@ class DefaultBlocklistSourceServiceTest {
         private void serves(final String url, final String body, final String etag, final String lastModified, final Runnable during) {
             answers.put(url, request -> {
                 during.run();
-                return new FetchResult(false, write(body), etag, lastModified);
+                return new FetchResult(false, write(body), etag, lastModified, url);
             });
         }
 
         private void servesAMissingFile(final String url) {
-            answers.put(url, request -> new FetchResult(false, directory.resolve("deleted-before-reading.tmp"), null, null));
+            answers.put(url, request -> new FetchResult(false, directory.resolve("deleted-before-reading.tmp"), null, null, url));
         }
 
         private void fails(final String url, final String message) {
@@ -1334,7 +1334,7 @@ class DefaultBlocklistSourceServiceTest {
         }
 
         private void notModified(final String url) {
-            answers.put(url, request -> new FetchResult(true, null, request.etag(), request.lastModified()));
+            answers.put(url, request -> new FetchResult(true, null, request.etag(), request.lastModified(), url));
         }
 
         private Path write(final String body) {

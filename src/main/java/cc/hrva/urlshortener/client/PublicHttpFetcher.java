@@ -167,7 +167,7 @@ public class PublicHttpFetcher {
             final var response = send(target, headers, deadline);
             final var location = response.header(HttpHeaders.LOCATION);
             if (!REDIRECT_STATUSES.contains(response.status()) || location.isEmpty()) {
-                return result(response, maxBytes, deadline, firstBytesOnly);
+                return result(response, target, maxBytes, deadline, firstBytesOnly);
             }
 
             response.close();
@@ -410,13 +410,13 @@ public class PublicHttpFetcher {
         }
     }
 
-    private FetchResult result(final PinnedHttpTransport.Response response, final long maxBytes, final long deadline,
+    private FetchResult result(final PinnedHttpTransport.Response response, final String finalUrl, final long maxBytes, final long deadline,
             final boolean firstBytesOnly) {
         final var etag = response.header(HttpHeaders.ETAG).orElse(null);
         final var lastModified = response.header(HttpHeaders.LAST_MODIFIED).orElse(null);
         if (response.status() == HttpStatus.NOT_MODIFIED.value()) {
             response.close();
-            return new FetchResult(true, null, etag, lastModified);
+            return new FetchResult(true, null, etag, lastModified, finalUrl);
         }
         if (response.status() / 100 != 2) {
             response.close();
@@ -426,7 +426,7 @@ public class PublicHttpFetcher {
             if (!firstBytesOnly && response.longHeader(HttpHeaders.CONTENT_LENGTH).orElse(0) > maxBytes) {
                 throw tooLarge(maxBytes);
             }
-            return new FetchResult(false, download(response.body(), maxBytes, deadline, firstBytesOnly), etag, lastModified);
+            return new FetchResult(false, download(response.body(), maxBytes, deadline, firstBytesOnly), etag, lastModified, finalUrl);
         } catch (final RuntimeException exception) {
             response.close();
             throw exception;

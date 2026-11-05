@@ -200,7 +200,7 @@ class RefreshBlocklistSourceFlowTest {
         when(publicHttpFetcher.fetch(eq(LIST_URL), anyLong(), any(), any(), any())).thenAnswer(invocation -> {
             final var body = Files.writeString(Files.createTempFile(downloads, "flow-", ".txt"), "example.com\nexample.org\n");
             meanwhile.run();
-            return new FetchResult(false, body, null, null);
+            return new FetchResult(false, body, null, null, LIST_URL);
         });
         doAnswer(invocation -> {
             duringStore.run();
@@ -234,7 +234,7 @@ class RefreshBlocklistSourceFlowTest {
         jdbcTemplate.update("update blocklist_source set last_success_url = ?, etag = 'e1', last_success_at = ?, last_error = 'HTTP 503' where id = ?",
                 LIST_URL, loadedBefore, SOURCE);
         when(blocklistStore.exists(SOURCE)).thenReturn(true);
-        when(publicHttpFetcher.fetch(eq(LIST_URL), anyLong(), eq("e1"), any(), any())).thenReturn(new FetchResult(true, null, "e1", null));
+        when(publicHttpFetcher.fetch(eq(LIST_URL), anyLong(), eq("e1"), any(), any())).thenReturn(new FetchResult(true, null, "e1", null, LIST_URL));
 
         mockMvc.perform(refresh()).andExpect(status().isOk());
 

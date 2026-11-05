@@ -527,7 +527,7 @@ class DefaultAbuseReportServiceTest {
         try {
             final var path = Files.createTempFile("rdap-recheck-", ".json");
             Files.writeString(path, body);
-            return new FetchResult(false, path, null, null);
+            return new FetchResult(false, path, null, null, "https://rdap.example/domain");
         } catch (final IOException exception) {
             throw new UncheckedIOException(exception);
         }

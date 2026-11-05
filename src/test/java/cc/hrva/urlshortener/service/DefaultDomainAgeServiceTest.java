@@ -640,7 +640,7 @@ class DefaultDomainAgeServiceTest {
                 throw new UrlValidationException(failures.get(url));
             }
             return Optional.ofNullable(answers.get(url))
-                    .map(answer -> new FetchResult(false, bodyOf(answer), null, null))
+                    .map(answer -> new FetchResult(false, bodyOf(answer), null, null, "https://example.com/"))
                     .orElseThrow(() -> new UrlValidationException("HTTP 404"));
         }
 
