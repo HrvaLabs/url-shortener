@@ -1,10 +1,39 @@
 {
   "releases": [
     {
-      "version": "v2.32",
+      "version": "v2.33",
       "date": "2026-11-05",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "Links to other URL shorteners are accepted. hrva.cc follows them to where they end, checks that page and checks them again every night.",
+      "sections": [
+        {
+          "title": "Link Safety",
+          "icon": "shield",
+          "items": [
+            "Links to other URL shorteners, such as bit.ly, are no longer refused. hrva.cc follows them to where they end and checks that page like any other destination, and it checks them again every night, because a shortener's target can change after the link is made. A bad final page is still blocked or sent to review.",
+            "Links to hrva.cc itself are still refused. The message is \"Links to hrva.cc can't be shortened again. Use the final destination instead.\" It applies when you create a link, change its destination or turn a link back on.",
+            "A link that goes through another shortener, or whose domain ends in a high-risk ending such as .top, no longer goes to review for that alone. Both only add a reason to a link that was already flagged or blocked for another one. They never show on their own. An older domain on such an ending with nothing else wrong is no longer flagged.",
+            "Reviews that were open only because of those reasons, or because the link went through another shortener or a free dynamic DNS host, were closed as fine, and the warning page for such a link without an account is gone. Dynamic DNS hosts on the HaGeZi DynDNS list are still sent to review.",
+            "Tunnel services such as ngrok and the closed 000webhost service are no longer flagged, because no maintained list names them."
+          ]
+        },
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "The lists of shorteners, risky domain endings and brands' own sites come from maintained online lists: HaGeZi URL shorteners, HaGeZi risky endings (every 24 hours) and Tranco brand sites (every 24 hours). The brand names stay in the code, because no maintained list says which brands phishers copy.",
+            "Blocklists has three new kinds, Shorteners, Domain endings and Brand sites, and a new action, Adds a reason. Shorteners and Domain endings lists go only with Adds a reason, Brand sites lists only with Brands' own sites, and the form offers just the actions that fit the kind. HaGeZi URL shorteners was changed to a Shorteners list and no longer flags links.",
+            "Site settings has a new setting under Safety, \"Brands' own sites: top sites\" (150,000 by default, 1,000 to 1,000,000). A new number takes effect at the next refresh of Tranco brand sites or with Refresh now.",
+            "While the Tranco brand sites list has no good copy, is off or can't be read, a site named after a brand on a normal ending still counts as that brand's own, so it isn't flagged as an imitation.",
+            "Every night, after the weekly re-check of 500 links, up to 500 links that go through another shortener whose last redirect check is over a day old are followed again, oldest first. If more are due, the rest wait for the next night."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.32",
+      "date": "2026-11-05",
       "summary": "Links made, repointed or turned back on from an account are checked for sign-in and card forms, and a link on hold shows Being checked.",
       "sections": [
         {
