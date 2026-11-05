@@ -1,7 +1,12 @@
 package cc.hrva.urlshortener.service;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.service.blocklist.HostListing;
+import cc.hrva.urlshortener.service.blocklist.HostListing.BrandSite;
+import cc.hrva.urlshortener.service.blocklist.HostLists;
 import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
+import cc.hrva.urlshortener.util.DomainNames;
+import java.util.Set;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,6 +17,11 @@ import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 class DefaultSuspiciousUrlServiceTest {
 
@@ -23,14 +33,18 @@ class DefaultSuspiciousUrlServiceTest {
     private static final String ZERO_WIDTH_NON_JOINER = codePoints(0x200C);
     private static final String MIXES_LATIN_AND_CYRILLIC = "mixes Latin and Cyrillic letters";
     private static final String LURE = "login or verification lure";
+    private static final Set<String> LISTED_BRAND_SITES = Set.of("njuskalo.hr", "jofogas.hu", "google.co.uk", "google.hr", "google.co.th", "apple.com",
+            "amazon.de", "amazon.co.uk", "ebay.co.uk", "olx.pl", "olx.ba", "airbnb.it", "vinted.hr", "dhl.de");
 
+    private final HostLists hostLists = mock(HostLists.class);
     private SuspiciousUrlService suspiciousUrlService;
 
     @BeforeEach
     void setUp() {
         final var appProperties = new AppProperties();
         appProperties.setServerUrl("https://hrva.cc");
-        suspiciousUrlService = new DefaultSuspiciousUrlService(appProperties);
+        when(hostLists.lookup(anyString())).thenAnswer(invocation -> listingOf(invocation.getArgument(0)));
+        suspiciousUrlService = new DefaultSuspiciousUrlService(appProperties, hostLists);
     }
 
     @ParameterizedTest
@@ -94,9 +108,70 @@ class DefaultSuspiciousUrlServiceTest {
     @ParameterizedTest
     @ValueSource(strings = {"https://www.amazon.de/dp/B0CX23V2ZK", "https://www.ebay.co.uk/itm/1234", "https://www.olx.pl/oferta",
             "https://www.google.hr/maps", "https://www.airbnb.it/rooms/1", "https://www.vinted.hr/items/1", "https://www.dhl.de/de/privatkunden.html",
-            "https://www.olx.ba/artikal/1"})
-    void trustsEachListedCountryDomainOfABrand(final String longUrl) {
+            "https://www.olx.ba/artikal/1", "https://www.google.co.th/maps"})
+    void trustsBrandSitesTheListHolds(final String longUrl) {
         assertThat(suspiciousUrlService.findReasons(longUrl)).isEmpty();
+    }
+
+    @Test
+    void aListedBrandSiteIsOfficial() {
+        onLists("njuskalo.hr", new HostListing(false, false, BrandSite.LISTED));
+
+        assertThat(suspiciousUrlService.findReasons("https://njuskalo.hr/login")).isEmpty();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"https://njuskalo.top/, njuskalo.top, imitates njuskalo", "https://www.airbnb.be/rooms/1, www.airbnb.be, imitates airbnb"})
+    void aBrandNamedDomainOffTheListImitates(final String longUrl, final String host, final String reason) {
+        onLists(host, new HostListing(false, false, BrandSite.NOT_LISTED));
+
+        assertThat(suspiciousUrlService.findReasons(longUrl)).containsExactly(reason);
+    }
+
+    @Test
+    void aListedBrandSiteOnARiskyEndingImitates() {
+        onLists("icloud.zip", new HostListing(false, true, BrandSite.LISTED));
+
+        assertThat(suspiciousUrlService.findReasons("https://icloud.zip/")).contains("imitates icloud");
+    }
+
+    @Test
+    void anUnknownBrandListTrustsExactBrandNamesOnly() {
+        onLists("njuskalo.hr", HostListing.unknown());
+        onLists("www.amazon.hr", HostListing.unknown());
+        onLists("njuskalo-placanje.com", HostListing.unknown());
+
+        assertThat(suspiciousUrlService.findReasons("https://njuskalo.hr/")).isEmpty();
+        assertThat(suspiciousUrlService.findReasons("https://www.amazon.hr/login")).isEmpty();
+        assertThat(suspiciousUrlService.findReasons("https://njuskalo-placanje.com/")).contains("imitates njuskalo");
+    }
+
+    @Test
+    void aBrandUnderAPrivateSuffixImitates() {
+        onLists("paypal.github.io", HostListing.unknown());
+
+        assertThat(suspiciousUrlService.findReasons("https://paypal.github.io/")).contains("imitates paypal");
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "https://njuskalo.invalidtld/, njuskalo.invalidtld, UNKNOWN, imitates njuskalo",
+            "https://njuskalo.invalidtld/, njuskalo.invalidtld, LISTED, imitates njuskalo",
+            "https://paypal.secure.invalidtld/, paypal.secure.invalidtld, UNKNOWN, imitates paypal",
+            "https://paypal.secure.invalidtld/, paypal.secure.invalidtld, LISTED, imitates paypal"
+    })
+    void aBrandOnAnEndingTheSuffixListDoesNotKnowImitates(final String longUrl, final String host, final BrandSite brandSite, final String reason) {
+        onLists(host, new HostListing(false, false, brandSite));
+
+        assertThat(suspiciousUrlService.findReasons(longUrl)).contains(reason);
+    }
+
+    @Test
+    void aHostWithCapitalsOrATrailingDotMatchesTheLists() {
+        onLists("njuskalo.hr", new HostListing(false, false, BrandSite.LISTED));
+
+        assertThat(suspiciousUrlService.findReasons("https://NJUSKALO.HR./")).isEmpty();
+        verify(hostLists).lookup("njuskalo.hr");
     }
 
     @ParameterizedTest
@@ -110,7 +185,7 @@ class DefaultSuspiciousUrlServiceTest {
             "https://airbnb.com.de/, imitates airbnb",
             "https://olx.hr/, imitates olx"
     })
-    void aBrandOnAnEndingItsOwnerDoesNotListIsALookalike(final String longUrl, final String reason) {
+    void aBrandOnADomainOffTheListIsALookalike(final String longUrl, final String reason) {
         assertThat(suspiciousUrlService.findReasons(longUrl)).contains(reason);
     }
 
@@ -122,21 +197,35 @@ class DefaultSuspiciousUrlServiceTest {
     }
 
     @Test
-    void flagsHighRiskDomainEndings() {
-        assertThat(suspiciousUrlService.findReasons("https://findfavoritedate.life/?u=f6yp608&o=mctw1k1&t=_free"))
-                .contains(SuspiciousUrlService.RISKY_ENDING_PREFIX + "life");
+    void aListedEndingAddsOnlyTheEndingReason() {
+        onLists("shop.example.bet", new HostListing(false, true, BrandSite.NOT_LISTED));
+
+        assertThat(suspiciousUrlService.findReasons("https://shop.example.bet/")).containsExactly("high-risk domain ending .bet");
     }
 
     @Test
-    void flagsFreeDynamicDnsHosts() {
-        assertThat(suspiciousUrlService.findReasons("https://tradicsummer.work.gd/?apps")).contains("free dynamic DNS host");
+    void anEndingOffTheListAddsNoReason() {
+        assertThat(suspiciousUrlService.findReasons("https://findfavoritedate.life/?u=f6yp608&o=mctw1k1&t=_free")).isEmpty();
     }
 
     @Test
-    void flagsLinksThatHideTheirDestinationBehindAnotherShortener() {
-        assertThat(suspiciousUrlService.findReasons("https://t9y.me/_zPx")).contains(SuspiciousUrlService.SHORTENER_REASON);
-        assertThat(suspiciousUrlService.findReasons("https://l.linklyhq.com/l/1jjds")).contains(SuspiciousUrlService.SHORTENER_REASON);
-        assertThat(suspiciousUrlService.findReasons("https://hrva.cc/Pb1mG")).contains(SuspiciousUrlService.SHORTENER_REASON);
+    void dynamicDnsHostsGetNoHeuristicReason() {
+        assertThat(suspiciousUrlService.findReasons("https://x.duckdns.org/")).isEmpty();
+        assertThat(suspiciousUrlService.findReasons("https://tradicsummer.work.gd/?apps")).isEmpty();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"https://bit.ly/x, bit.ly", "https://go.short.example.net/x, go.short.example.net"})
+    void aListedShortenerAddsOnlyTheShortenerReason(final String longUrl, final String host) {
+        onLists(host, new HostListing(true, false, BrandSite.NOT_LISTED));
+
+        assertThat(suspiciousUrlService.findReasons(longUrl)).containsExactly(SuspiciousUrlService.SHORTENER_REASON);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"https://tinyurl.com/x", "https://t.co/AbC123", "https://lnkd.in/dX9yZ", "https://hrva.cc/Pb1mG"})
+    void aShortenerOffTheListAddsNoReason(final String longUrl) {
+        assertThat(suspiciousUrlService.findReasons(longUrl)).isEmpty();
     }
 
     @Test
@@ -152,17 +241,12 @@ class DefaultSuspiciousUrlServiceTest {
         assertThat(SuspiciousUrlService.isSupporting(reason)).isFalse();
     }
 
-    @Test
-    void stillFlagsPlatformShareShortenersForReview() {
-        assertThat(suspiciousUrlService.findReasons("https://t.co/AbC123")).contains(SuspiciousUrlService.SHORTENER_REASON);
-        assertThat(suspiciousUrlService.findReasons("https://lnkd.in/dX9yZ")).contains(SuspiciousUrlService.SHORTENER_REASON);
-    }
-
     @ParameterizedTest
     @ValueSource(strings = {"http://185.12.4.9/login", "http://[2001:db8::1]/login", "https://[::1]:8443/", "http://0x7f.0.0.1/",
             "http://0x7f000001/login", "http://0177.0.0.1/", "http://2130706433/", "http://127.1/", "http://01.2.3.4/"})
     void flagsRawIpAddresses(final String longUrl) {
         assertThat(suspiciousUrlService.findReasons(longUrl)).containsExactly("IP address instead of a domain");
+        verifyNoInteractions(hostLists);
     }
 
     @ParameterizedTest
@@ -292,33 +376,55 @@ class DefaultSuspiciousUrlServiceTest {
     @ParameterizedTest
     @ValueSource(strings = {"https://čokolada.top/login", "https://xn--okolada-i6a.top/login"})
     void readsAUnicodeHostInsteadOfSkippingEveryCheck(final String longUrl) {
+        onLists("xn--okolada-i6a.top", new HostListing(false, true, BrandSite.NOT_LISTED));
+
         assertThat(suspiciousUrlService.findReasons(longUrl))
                 .containsExactly("login or verification lure", SuspiciousUrlService.RISKY_ENDING_PREFIX + "top");
     }
 
     @Test
     void readsAHostWithAnUnderscoreInsteadOfSkippingEveryCheck() {
-        assertThat(suspiciousUrlService.findReasons("https://my_shop.duckdns.org/")).containsExactly("free dynamic DNS host");
+        assertThat(suspiciousUrlService.findReasons("https://my_shop.duckdns.org/login")).containsExactly(LURE);
+        verify(hostLists).lookup("my_shop.duckdns.org");
     }
 
     @Test
     void readsAFullWidthShortenerLikeABrowser() {
+        onLists("bit.ly", new HostListing(true, false, BrandSite.NOT_LISTED));
+
         assertThat(suspiciousUrlService.findReasons("https://\uff42\uff49\uff54\uff0e\uff4c\uff59/3abc"))
                 .containsExactly(SuspiciousUrlService.SHORTENER_REASON);
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"https://bit.ly/3abc", "https://www.tinyurl.com/x", "https://kaywa.me/E7RVW", "https://hrva.cc/sd", "https://HRVA.CC",
-            "https://\uff42\uff49\uff54\uff0e\uff4c\uff59/3abc", "https://\uff48\uff52\uff56\uff41.cc/sd", "https://bit.ly./3abc"})
-    void recognisesOtherShorteners(final String longUrl) {
-        assertThat(suspiciousUrlService.isShortener(longUrl)).isTrue();
+    @ValueSource(strings = {"https://hrva.cc/sd", "https://HRVA.CC", "https://hrva.cc./sd", "https://\uff48\uff52\uff56\uff41.cc/sd"})
+    void ownHostIsAnOwnLink(final String longUrl) {
+        assertThat(suspiciousUrlService.isOwnLink(longUrl)).isTrue();
+    }
+
+    @Test
+    void aListedShortenerIsNotAnOwnLink() {
+        onLists("bit.ly", new HostListing(true, false, BrandSite.NOT_LISTED));
+
+        assertThat(suspiciousUrlService.isOwnLink("https://bit.ly/3abc")).isFalse();
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"https://app.hrva.cc/", "https://www.youtube.com/watch?v=1", "not a url",
-            "https://maps.app.goo.gl/Ux7Qm1aBcD", "https://t.co/AbC123", "https://lnkd.in/dX9yZ"})
-    void doesNotRefuseOrdinarySitesOrPlatformShareLinks(final String longUrl) {
-        assertThat(suspiciousUrlService.isShortener(longUrl)).isFalse();
+    @ValueSource(strings = {"https://app.hrva.cc/", "https://www.youtube.com/watch?v=1", "not a url", "https://maps.app.goo.gl/Ux7Qm1aBcD",
+            "https://t.co/AbC123", "https://tinyurl.com/x"})
+    void otherHostsAreNotOwnLinks(final String longUrl) {
+        assertThat(suspiciousUrlService.isOwnLink(longUrl)).isFalse();
+    }
+
+    @Test
+    void isListedShortenerReadsTheList() {
+        onLists("go.short.example.net", new HostListing(true, false, BrandSite.NOT_LISTED));
+        onLists("bit.ly", new HostListing(false, false, BrandSite.NOT_LISTED));
+
+        assertThat(suspiciousUrlService.isListedShortener("https://go.short.example.net/x")).isTrue();
+        assertThat(suspiciousUrlService.isListedShortener("https://bit.ly/3abc")).isFalse();
+        assertThat(suspiciousUrlService.isListedShortener("https://hrva.cc/sd")).isFalse();
+        assertThat(suspiciousUrlService.isListedShortener("not a url")).isFalse();
     }
 
 
@@ -475,6 +581,15 @@ class DefaultSuspiciousUrlServiceTest {
         assertThat(suspiciousUrlService.findNamedBrand("DH" + codePoints(0x0141))).contains("dhl");
         assertThat(suspiciousUrlService.findNamedBrand("Ana from Booking")).contains("booking");
         assertThat(suspiciousUrlService.findNamedBrand("official_netflix_shop")).contains("netflix");
+    }
+
+    private void onLists(final String host, final HostListing listing) {
+        when(hostLists.lookup(host)).thenReturn(listing);
+    }
+
+    private static HostListing listingOf(final String host) {
+        final var brandSite = LISTED_BRAND_SITES.contains(DomainNames.registryDomain(host)) ? BrandSite.LISTED : BrandSite.NOT_LISTED;
+        return new HostListing(false, false, brandSite);
     }
 
     private static Stream<String> plainTexts() {

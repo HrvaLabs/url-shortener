@@ -2,6 +2,10 @@ package cc.hrva.urlshortener.service.impl;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
+import cc.hrva.urlshortener.service.blocklist.HostListing;
+import cc.hrva.urlshortener.service.blocklist.HostListing.BrandSite;
+import cc.hrva.urlshortener.service.blocklist.HostLists;
+import cc.hrva.urlshortener.util.BrandNames;
 import cc.hrva.urlshortener.util.DomainNames;
 import java.lang.Character.UnicodeScript;
 import java.net.URI;
@@ -21,66 +25,6 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
-
-    private static final Map<String, Set<String>> BRAND_DOMAINS = Map.ofEntries(
-            Map.entry("njuskalo", Set.of("njuskalo.hr")),
-            Map.entry("jofogas", Set.of("jofogas.hu")),
-            Map.entry("paypal", Set.of("paypal.com", "paypal.me", "paypalobjects.com")),
-            Map.entry("revolut", Set.of("revolut.com", "revolut.me")),
-            Map.entry("apple", Set.of("apple.com")),
-            Map.entry("icloud", Set.of("icloud.com")),
-            Map.entry("microsoft", Set.of("microsoft.com")),
-            Map.entry("outlook", Set.of("outlook.com")),
-            Map.entry("google", Set.of("google.com", "google.hr", "google.si", "google.ba", "google.rs", "google.me", "google.mk",
-                    "google.al", "google.bg", "google.ro", "google.hu", "google.sk", "google.cz", "google.pl", "google.at", "google.de",
-                    "google.ch", "google.li", "google.it", "google.fr", "google.es", "google.pt", "google.be", "google.nl", "google.lu",
-                    "google.co.uk", "google.ie", "google.dk", "google.se", "google.no", "google.fi", "google.is", "google.ee", "google.lv",
-                    "google.lt", "google.gr", "google.com.cy", "google.com.mt", "google.com.tr", "google.com.ua", "google.ca",
-                    "google.com.mx", "google.com.br", "google.com.ar", "google.com.au", "google.co.nz", "google.co.in", "google.co.jp",
-                    "google.co.kr", "google.co.za", "google.ae")),
-            Map.entry("gmail", Set.of("gmail.com")),
-            Map.entry("facebook", Set.of("facebook.com")),
-            Map.entry("instagram", Set.of("instagram.com")),
-            Map.entry("whatsapp", Set.of("whatsapp.com", "whatsapp.net")),
-            Map.entry("netflix", Set.of("netflix.com")),
-            Map.entry("amazon", Set.of("amazon.com", "amazon.de", "amazon.co.uk", "amazon.fr", "amazon.it", "amazon.es", "amazon.nl",
-                    "amazon.pl", "amazon.se", "amazon.com.be", "amazon.ca", "amazon.com.mx", "amazon.com.br", "amazon.com.au",
-                    "amazon.co.jp", "amazon.in", "amazon.com.tr", "amazon.ae", "amazon.sa", "amazon.sg", "amazon.eg", "amazon.cn")),
-            Map.entry("booking", Set.of("booking.com")),
-            Map.entry("airbnb", Set.of("airbnb.com", "airbnb.co.uk", "airbnb.de", "airbnb.at", "airbnb.ch", "airbnb.fr", "airbnb.it",
-                    "airbnb.es", "airbnb.pt", "airbnb.nl", "airbnb.be", "airbnb.ie", "airbnb.dk", "airbnb.se", "airbnb.no", "airbnb.fi",
-                    "airbnb.pl", "airbnb.gr", "airbnb.ca", "airbnb.mx", "airbnb.com.br", "airbnb.com.au", "airbnb.co.in", "airbnb.jp")),
-            Map.entry("vinted", Set.of("vinted.com", "vinted.hr", "vinted.de", "vinted.at", "vinted.fr", "vinted.it", "vinted.es",
-                    "vinted.pt", "vinted.nl", "vinted.be", "vinted.lu", "vinted.co.uk", "vinted.ie", "vinted.pl", "vinted.cz", "vinted.sk",
-                    "vinted.hu", "vinted.ro", "vinted.lt", "vinted.se", "vinted.dk", "vinted.fi", "vinted.gr")),
-            Map.entry("ebay", Set.of("ebay.com", "ebay.de", "ebay.at", "ebay.ch", "ebay.co.uk", "ebay.ie", "ebay.fr", "ebay.it",
-                    "ebay.es", "ebay.nl", "ebay.be", "ebay.pl", "ebay.ca", "ebay.com.au")),
-            Map.entry("olx", Set.of("olx.com", "olx.ba", "olx.pl", "olx.ro", "olx.bg", "olx.pt", "olx.ua", "olx.kz", "olx.uz",
-                    "olx.com.br", "olx.in")),
-            Map.entry("dhl", Set.of("dhl.com", "dhl.de")),
-            Map.entry("coinbase", Set.of("coinbase.com")),
-            Map.entry("binance", Set.of("binance.com")));
-
-    private static final Set<String> COMMON_WORD_BRANDS = Set.of("booking", "outlook");
-
-    private static final Set<String> SHORTENER_DOMAINS = Set.of(
-            "bit.ly", "bitly.com", "bit.do", "t.ly", "tinyurl.com", "ow.ly", "is.gd", "v.gd",
-            "buff.ly", "rebrand.ly", "cutt.ly", "shorturl.at", "rb.gy", "tiny.cc", "s.id", "bl.ink", "short.io",
-            "shorte.st", "adf.ly", "qrco.de", "clck.ru", "u.to", "x.co", "soo.gd",
-            "shrtco.de", "urlz.fr", "gg.gg", "cli.re", "han.gl", "t9y.me", "kaywa.me", "linklyhq.com", "iiil.io");
-
-    private static final Set<String> PLATFORM_SHARE_DOMAINS = Set.of("goo.gl", "t.co", "lnkd.in", "ift.tt", "dlvr.it");
-
-    private static final Set<String> TRUSTED_SHARE_DOMAINS = Set.of("app.goo.gl");
-
-    private static final Set<String> DYNAMIC_DNS_DOMAINS = Set.of(
-            "work.gd", "duckdns.org", "ddns.net", "hopto.org", "zapto.org", "sytes.net", "no-ip.org", "no-ip.biz",
-            "serveftp.com", "myftp.org", "freeddns.org", "dynu.net", "ngrok.io", "ngrok.app", "ngrok-free.app",
-            "trycloudflare.com", "loca.lt", "serveo.net", "000webhostapp.com");
-
-    private static final Set<String> HIGH_RISK_ENDINGS = Set.of(
-            "top", "xyz", "click", "link", "cam", "icu", "buzz", "monster", "rest", "bar", "cfd", "sbs", "lol",
-            "quest", "zip", "mov", "life", "work", "cyou", "tk", "ml", "ga", "cf", "gq");
 
     private static final Set<String> HOST_LURES = Set.of("verif", "login", "signin", "secure", "banking", "wallet");
     private static final Set<String> HOST_LURE_WORDS = Set.of("auth", "account", "accounts");
@@ -121,9 +65,11 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
     private static final Pattern FORMAT_CHARACTERS = Pattern.compile("\\p{Cf}+");
 
     private final String ownHost;
+    private final HostLists hostLists;
 
-    public DefaultSuspiciousUrlService(final AppProperties appProperties) {
+    public DefaultSuspiciousUrlService(final AppProperties appProperties, final HostLists hostLists) {
         this.ownHost = DomainNames.hostOf(appProperties.getServerUrl()).orElse(null);
+        this.hostLists = hostLists;
     }
 
     @Override
@@ -140,33 +86,33 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
             return reasons;
         }
 
-        final var labels = host.split(LABEL_SEPARATOR);
         final var unicodeLabels = hostName.unicode().split(LABEL_SEPARATOR);
         final var lookalikeLabels = Arrays.stream(unicodeLabels).map(DefaultSuspiciousUrlService::latinLookalike).toArray(String[]::new);
-        final var domain = DomainNames.registrableDomain(host);
+        final var listing = hostLists.lookup(host);
 
-        if (isShortenerHost(host) || matchesDomain(host, PLATFORM_SHARE_DOMAINS) && !matchesDomain(host, TRUSTED_SHARE_DOMAINS)) {
+        if (listing.shortener()) {
             reasons.add(SHORTENER_REASON);
         }
-        if (matchesDomain(host, DYNAMIC_DNS_DOMAINS)) {
-            reasons.add("free dynamic DNS host");
-        }
         reasons.addAll(alphabetReasons(unicodeLabels));
-        imitatedBrand(lookalikeLabels, domain).ifPresent(brand -> reasons.add(IMITATES_PREFIX + brand));
-        if (!isOfficialBrandDomain(domain) && hasLure(lookalikeLabels, longUrl)) {
+        imitatedBrand(lookalikeLabels, host, listing).ifPresent(brand -> reasons.add(IMITATES_PREFIX + brand));
+        if (!isOfficialBrandSite(host, listing) && hasLure(lookalikeLabels, longUrl)) {
             reasons.add(LOGIN_LURE);
         }
-        final var ending = labels[labels.length - 1];
-        if (HIGH_RISK_ENDINGS.contains(ending)) {
-            reasons.add(RISKY_ENDING_PREFIX + ending);
+        if (listing.riskyEnding()) {
+            reasons.add(RISKY_ENDING_PREFIX + host.substring(host.lastIndexOf('.') + 1));
         }
 
         return reasons;
     }
 
     @Override
-    public boolean isShortener(final String longUrl) {
-        return DomainNames.hostOf(longUrl).map(this::isShortenerHost).orElse(false);
+    public boolean isOwnLink(final String longUrl) {
+        return DomainNames.hostOf(longUrl).map(host -> host.equals(ownHost)).orElse(false);
+    }
+
+    @Override
+    public boolean isListedShortener(final String longUrl) {
+        return DomainNames.hostOf(longUrl).map(host -> hostLists.lookup(host).shortener()).orElse(false);
     }
 
     @Override
@@ -199,8 +145,8 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
             return Optional.empty();
         }
         final var joined = String.join("", wordsOf(handle).stream().map(DefaultSuspiciousUrlService::wordLookalike).toList());
-        return findImitatedBrand(handle).or(() -> BRAND_DOMAINS.keySet().stream()
-                .filter(brand -> brand.length() >= DISTINCTIVE_BRAND_LENGTH && !COMMON_WORD_BRANDS.contains(brand) && joined.contains(brand))
+        return findImitatedBrand(handle).or(() -> BrandNames.ALL.stream()
+                .filter(brand -> brand.length() >= DISTINCTIVE_BRAND_LENGTH && !BrandNames.COMMON_WORDS.contains(brand) && joined.contains(brand))
                 .sorted()
                 .findFirst());
     }
@@ -209,7 +155,7 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
     public Optional<String> findNamedBrand(final String text) {
         return wordsOf(text).stream()
                 .map(DefaultSuspiciousUrlService::wordLookalike)
-                .filter(BRAND_DOMAINS::containsKey)
+                .filter(BrandNames.ALL::contains)
                 .findFirst();
     }
 
@@ -228,10 +174,10 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
     }
 
     private static Optional<String> brandResembledBy(final String word) {
-        if (BRAND_DOMAINS.containsKey(word)) {
+        if (BrandNames.ALL.contains(word)) {
             return Optional.of(word);
         }
-        return BRAND_DOMAINS.keySet().stream().filter(brand -> resembles(word, brand)).sorted().findFirst();
+        return BrandNames.ALL.stream().filter(brand -> resembles(word, brand)).sorted().findFirst();
     }
 
     private static Set<String> alphabetReasons(final String[] unicodeLabels) {
@@ -283,19 +229,11 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
         return lookalike.toString();
     }
 
-    private boolean isShortenerHost(final String host) {
-        return host.equals(ownHost) || matchesDomain(host, SHORTENER_DOMAINS);
-    }
-
-    private static boolean matchesDomain(final String host, final Set<String> domains) {
-        return domains.stream().anyMatch(domain -> host.equals(domain) || host.endsWith("." + domain));
-    }
-
-    private static Optional<String> imitatedBrand(final String[] labels, final String domain) {
+    private static Optional<String> imitatedBrand(final String[] labels, final String host, final HostListing listing) {
         return Arrays.stream(labels)
                 .flatMap(label -> Arrays.stream(label.split("-")))
-                .flatMap(part -> BRAND_DOMAINS.keySet().stream().filter(brand -> resembles(part, brand)))
-                .filter(brand -> !isOfficialDomainOf(brand, domain))
+                .flatMap(part -> BrandNames.ALL.stream().filter(brand -> resembles(part, brand)))
+                .filter(brand -> !isOfficialSiteOf(brand, host, listing))
                 .findFirst();
     }
 
@@ -303,12 +241,13 @@ public class DefaultSuspiciousUrlService implements SuspiciousUrlService {
         return part.equals(brand) || brand.length() >= DISTINCTIVE_BRAND_LENGTH && differsByOneLetter(part, brand);
     }
 
-    private static boolean isOfficialBrandDomain(final String domain) {
-        return BRAND_DOMAINS.keySet().stream().anyMatch(brand -> isOfficialDomainOf(brand, domain));
+    private static boolean isOfficialBrandSite(final String host, final HostListing listing) {
+        return BrandNames.ALL.stream().anyMatch(brand -> isOfficialSiteOf(brand, host, listing));
     }
 
-    private static boolean isOfficialDomainOf(final String brand, final String domain) {
-        return BRAND_DOMAINS.get(brand).contains(domain);
+    private static boolean isOfficialSiteOf(final String brand, final String host, final HostListing listing) {
+        final var trustedListing = listing.brandSite() == BrandSite.UNKNOWN || listing.brandSite() == BrandSite.LISTED && !listing.riskyEnding();
+        return trustedListing && DomainNames.isUnderRegistrySuffix(host) && DomainNames.registryNameOf(host).equals(brand);
     }
 
     private static boolean hasLure(final String[] labels, final String longUrl) {

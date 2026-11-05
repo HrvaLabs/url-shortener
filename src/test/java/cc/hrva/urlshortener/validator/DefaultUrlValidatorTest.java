@@ -20,7 +20,11 @@ import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.service.blocklist.HostListing;
+import cc.hrva.urlshortener.service.blocklist.HostListing.BrandSite;
+import cc.hrva.urlshortener.service.blocklist.HostLists;
 import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
+import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import cc.hrva.urlshortener.util.DomainNames;
@@ -38,6 +42,8 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThatCode;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -103,22 +109,22 @@ class DefaultUrlValidatorTest {
         assertThat(urlValidator.checkIfLongUrlIsNotBlocklisted(url)).isEqualTo(verdict);
     }
 
-    @Test
-    void rejectsLinksToOtherShorteners() {
-        final var url = Url.builder().longUrl("https://bit.ly/3abc").build();
-        when(suspiciousUrlService.isShortener("https://bit.ly/3abc")).thenReturn(true);
+    @ParameterizedTest
+    @ValueSource(strings = {"https://hrva.cc/abc", "https://HRVA.CC./abc"})
+    void refusesALinkToOurOwnHost(final String longUrl) {
+        final var url = Url.builder().longUrl(longUrl).build();
 
-        assertThatThrownBy(() -> urlValidator.checkIfLongUrlIsNotAShortener(url))
+        assertThatThrownBy(() -> validatorReadingLinks().checkIfLongUrlIsNotOwnLink(url))
                 .isInstanceOf(UrlValidationException.class)
-                .hasMessage("Links to other URL shorteners can't be shortened. Use the final destination instead.");
+                .hasMessage("Links to hrva.cc can't be shortened again. Use the final destination instead.");
     }
 
-    @Test
-    void acceptsDestinationsThatAreNotShorteners() {
-        final var url = Url.builder().longUrl("https://example.com").build();
-        when(suspiciousUrlService.isShortener("https://example.com")).thenReturn(false);
+    @ParameterizedTest
+    @ValueSource(strings = {"https://bit.ly/3abc", "https://tinyurl.com/x", "https://example.com"})
+    void acceptsALinkToAnotherShortener(final String longUrl) {
+        final var url = Url.builder().longUrl(longUrl).build();
 
-        urlValidator.checkIfLongUrlIsNotAShortener(url);
+        assertThatCode(() -> validatorReadingLinks().checkIfLongUrlIsNotOwnLink(url)).doesNotThrowAnyException();
     }
 
     @Test
@@ -726,5 +732,14 @@ class DefaultUrlValidatorTest {
                 .twoStepEnabled(true)
                 .authorities(List.of(Authorities.builder().name(role).build()))
                 .build();
+    }
+
+    private UrlValidator validatorReadingLinks() {
+        final var appProperties = new AppProperties();
+        appProperties.setServerUrl("https://hrva.cc");
+        final var hostLists = mock(HostLists.class);
+        lenient().when(hostLists.lookup(anyString())).thenReturn(new HostListing(true, false, BrandSite.NOT_LISTED));
+        return new DefaultUrlValidator(userService, urlRepository, safeBrowsingService, new DefaultSuspiciousUrlService(appProperties, hostLists),
+                linkCheckService, reservedAliasService, settingsService);
     }
 }

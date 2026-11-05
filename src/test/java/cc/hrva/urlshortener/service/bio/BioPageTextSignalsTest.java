@@ -1,6 +1,8 @@
 package cc.hrva.urlshortener.service.bio;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.service.blocklist.HostListing;
+import cc.hrva.urlshortener.service.blocklist.HostLists;
 import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -9,6 +11,9 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class BioPageTextSignalsTest {
 
@@ -22,7 +27,9 @@ class BioPageTextSignalsTest {
     void setUp() {
         final var appProperties = new AppProperties();
         appProperties.setServerUrl("https://hrva.cc");
-        bioPageTextSignals = new BioPageTextSignals(new DefaultSuspiciousUrlService(appProperties));
+        final var hostLists = mock(HostLists.class);
+        when(hostLists.lookup(anyString())).thenReturn(HostListing.unknown());
+        bioPageTextSignals = new BioPageTextSignals(new DefaultSuspiciousUrlService(appProperties, hostLists));
     }
 
     @Test

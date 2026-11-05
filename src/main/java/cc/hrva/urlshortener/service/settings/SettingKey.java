@@ -23,8 +23,9 @@ public enum SettingKey {
             "The enabled blocklists and Spamhaus, on new links, clicks, the nightly recheck, redirect hops, Allow-rule restores, custom-domain "
                     + "applications and the nightly custom-domain check. Domain rules always apply.", null, true),
     SUSPICIOUS_LINK_CHECK(SettingGroup.SAFETY, "Suspicious-link check",
-            "Lookalike brands, risky endings, login lures and young domains, on new links, the nightly recheck, redirect hops, Allow-rule "
-                    + "restores, custom-domain applications and the nightly custom-domain check.", null, true),
+            "Lookalike brands, login lures and young domains, on new links, the nightly recheck, redirect hops, Allow-rule restores, "
+                    + "custom-domain applications and the nightly custom-domain check. Risky endings and other shorteners only add to a reason "
+                    + "found another way.", null, true),
     NIGHTLY_SAFE_BROWSING(SettingGroup.SAFETY, "Nightly Safe Browsing recheck",
             "The Safe Browsing part of the 04:30 recheck. The same run's Safe Browsing lookups on redirect hops still happen, and the other rechecks "
                     + "follow their own switches.", null, true),

@@ -80,6 +80,9 @@ import cc.hrva.urlshortener.model.enums.ReviewResolution;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.DestinationCheckRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
+import cc.hrva.urlshortener.service.blocklist.HostListing;
+import cc.hrva.urlshortener.service.blocklist.HostListing.BrandSite;
+import cc.hrva.urlshortener.service.blocklist.HostLists;
 import cc.hrva.urlshortener.service.burst.CreatedLink;
 import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
 import cc.hrva.urlshortener.service.domain.DomainRoute;
@@ -154,6 +157,7 @@ import static org.mockito.Mockito.when;
 class UrlServiceTest {
 
     private static final String BLOCKLIST_REFUSAL = "This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us.";
+    private static final String OWN_LINK_REFUSAL = "Links to hrva.cc can't be shortened again. Use the final destination instead.";
     private static final List<String> YOUNG_DOMAIN = List.of("domain registered in the last 30 days");
     private static final String CAMPAIGN_LINK = "https://ll.omaehhm.com/wqamhcsom/?r=plfN8D&t=1793210826";
     private static final String FRONTEND = "https://hrva.cc";
@@ -286,6 +290,9 @@ class UrlServiceTest {
 
     @Mock
     private ModerationService moderationService;
+
+    @Mock
+    private HostLists hostLists;
 
     private AnonymousLinkSignals anonymousLinkSignals;
 
@@ -431,7 +438,7 @@ class UrlServiceTest {
         order.verify(destinationChangeService).requireAllowed(eq(url), any());
         order.verify(urlValidator).longUrlInUrl(changed);
         order.verify(urlValidator).checkIfLongUrlIsValid(changed);
-        order.verify(urlValidator).checkIfLongUrlIsNotAShortener(changed);
+        order.verify(urlValidator).checkIfLongUrlIsNotOwnLink(changed);
         order.verify(urlValidator).destinationVerdict(changed);
         order.verify(destinationChangeService).countChange(eq(url), any());
         order.verify(urlRepository).save(url);
@@ -604,6 +611,25 @@ class UrlServiceTest {
 
         verify(urlRepository, never()).save(any());
         verify(destinationChangeService, never()).record(any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean());
+    }
+
+    @Test
+    void anAdminRepointsToAListedShortenerWithoutConfirming() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://bit.ly/abc").build();
+        final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://bit.ly/abc").visits(0L).active(true).build();
+        when(appProperties.getServerUrl()).thenReturn("https://hrva.cc");
+        lenient().when(hostLists.lookup("bit.ly")).thenReturn(new HostListing(true, false, BrandSite.NOT_LISTED));
+        when(userService.getUserFromToken()).thenReturn(admin());
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
+        when(urlRepository.save(url)).thenReturn(url);
+        when(linkCheckService.check("https://bit.ly/abc")).thenReturn(LinkVerdict.clean());
+
+        assertThat(urlServiceWithRealLongUrlHandling().updateUrl(update, null).longUrl()).isEqualTo("https://bit.ly/abc");
+
+        verify(urlRepository).save(url);
+        verify(destinationChangeService).record(eq(url), eq("https://old.example"), any(), eq(false));
     }
 
     @Test
@@ -813,7 +839,7 @@ class UrlServiceTest {
         final var order = inOrder(urlValidator, urlRepository);
         order.verify(urlValidator).longUrlInUrl(url);
         order.verify(urlValidator).checkIfLongUrlIsValid(url);
-        order.verify(urlValidator).checkIfLongUrlIsNotAShortener(url);
+        order.verify(urlValidator).checkIfLongUrlIsNotOwnLink(url);
         order.verify(urlValidator).checkIfLongUrlIsNotBlocklisted(url);
         order.verify(urlValidator).checkIfUrlSafe(url);
         order.verify(urlValidator).checkIfUrlExpirationDateIsInThePast(url);
@@ -845,7 +871,7 @@ class UrlServiceTest {
 
         verify(urlValidator).checkIfLongUrlIsValid(created);
         verify(urlValidator).checkIfLongUrlIsValid(changed);
-        verify(urlValidator, never()).checkIfLongUrlIsNotAShortener(any());
+        verify(urlValidator, never()).checkIfLongUrlIsNotOwnLink(any());
         verify(urlValidator, never()).checkIfLongUrlIsNotBlocklisted(any());
         verify(urlValidator, never()).checkIfUrlSafe(any());
         verify(urlRepository, never()).save(any());
@@ -897,7 +923,7 @@ class UrlServiceTest {
         urlService.saveUrlWithApiKey(createUrlDto, "apikey", CreatedVia.API_KEY);
 
         final var order = inOrder(urlValidator, urlRepository, reviewQueueService);
-        order.verify(urlValidator).checkIfLongUrlIsNotAShortener(url);
+        order.verify(urlValidator).checkIfLongUrlIsNotOwnLink(url);
         order.verify(urlValidator).checkIfLongUrlIsNotBlocklisted(url);
         order.verify(urlValidator).checkIfUrlSafe(url);
         order.verify(urlRepository).save(url);
@@ -3830,16 +3856,32 @@ class UrlServiceTest {
     }
 
     @Test
-    void reactivatingRefusesALinkToAnotherShortenerLikeANewLink() {
-        final var url = Url.builder().id(1L).shortUrl("promo").longUrl("https://bit.ly/abc").active(false).build();
+    void reactivatingRefusesALinkToOurOwnHostLikeANewLink() {
+        final var url = Url.builder().id(1L).shortUrl("promo").longUrl("https://hrva.cc/abc").active(false).build();
         when(urlRepository.findById(1L)).thenReturn(Optional.of(url));
-        org.mockito.Mockito.doThrow(new UrlValidationException("Links to other URL shorteners can't be shortened. Use the final destination instead."))
-                .when(urlValidator).checkIfLongUrlIsNotAShortener(url);
+        org.mockito.Mockito.doThrow(new UrlValidationException(OWN_LINK_REFUSAL)).when(urlValidator).checkIfLongUrlIsNotOwnLink(url);
 
         assertThatThrownBy(() -> urlService.activateUrl(1L))
                 .isInstanceOf(UrlValidationException.class);
 
         verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void turningOnALinkToAListedShortenerIsAllowed() {
+        final var owner = User.builder().id(1L).build();
+        final var url = Url.builder().id(1L).shortUrl("promo").longUrl("https://bit.ly/abc").owner(owner).active(false).build();
+        when(appProperties.getServerUrl()).thenReturn("https://hrva.cc");
+        lenient().when(hostLists.lookup("bit.ly")).thenReturn(new HostListing(true, false, BrandSite.NOT_LISTED));
+        when(urlRepository.findById(1L)).thenReturn(Optional.of(url));
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(userService.getUserFromToken()).thenReturn(owner);
+        when(linkCheckService.check("https://bit.ly/abc")).thenReturn(LinkVerdict.clean());
+
+        assertThat(urlServiceWithRealLongUrlHandling().activateUrl(1L).active()).isTrue();
+
+        verify(urlRepository).save(url);
+        verify(redirectChainService).checkLater(1L);
     }
 
     @Test
@@ -3885,7 +3927,7 @@ class UrlServiceTest {
         order.verify(urlValidator).verifyUserAdminOrOwner(url);
         order.verify(urlValidator).checkIfUrlNotBlocked(url);
         order.verify(urlValidator).checkIfShortUrlIsFreeToReactivate(null, "promo");
-        order.verify(urlValidator).checkIfLongUrlIsNotAShortener(url);
+        order.verify(urlValidator).checkIfLongUrlIsNotOwnLink(url);
         order.verify(urlValidator).checkIfDestinationNotBlocked(url);
         order.verify(urlValidator).checkIfUrlSafe(url);
         order.verify(urlRepository).save(url);
@@ -4088,14 +4130,15 @@ class UrlServiceTest {
     }
 
     @Test
-    void shouldRejectLinksToOtherShortenersWhenSavingUrlWithApiKey() {
+    void shouldRejectLinksToOurOwnHostWhenSavingUrlWithApiKey() {
+        when(appProperties.getServerUrl()).thenReturn("https://hrva.cc");
         final var service = urlServiceWithRealLongUrlHandling();
-        final var createUrlDto = CreateUrlDto.builder().longUrl("https://bit.ly/3abc").build();
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://hrva.cc/3abc").build();
         when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(User.builder().id(1L).build()).build());
 
         assertThatThrownBy(() -> service.saveUrlWithApiKey(createUrlDto, "apikey", CreatedVia.API_KEY))
                 .isInstanceOf(UrlValidationException.class)
-                .hasMessage("Links to other URL shorteners can't be shortened. Use the final destination instead.");
+                .hasMessage(OWN_LINK_REFUSAL);
 
         verify(linkCheckService, never()).check(anyString());
         verify(safeBrowsingService, never()).checkUrlsForThreats(anyString());
@@ -5712,8 +5755,8 @@ class UrlServiceTest {
         final var transactionManager = new DataSourceTransactionManager(new DriverManagerDataSource("jdbc:h2:mem:"));
         final var service = new DefaultUrlService(
                 userService,
-                new DefaultUrlValidator(userService, urlRepository, safeBrowsingService, new DefaultSuspiciousUrlService(appProperties), linkCheckService,
-                        reservedAliasService, settingsService),
+                new DefaultUrlValidator(userService, urlRepository, safeBrowsingService, new DefaultSuspiciousUrlService(appProperties, hostLists),
+                        linkCheckService, reservedAliasService, settingsService),
                 apiKeyService,
                 urlRepository,
                 appProperties,
@@ -5752,8 +5795,8 @@ class UrlServiceTest {
     private UrlService urlServiceWithRealLongUrlHandling() {
         return new DefaultUrlService(
                 userService,
-                new DefaultUrlValidator(userService, urlRepository, safeBrowsingService, new DefaultSuspiciousUrlService(appProperties), linkCheckService,
-                        reservedAliasService, settingsService),
+                new DefaultUrlValidator(userService, urlRepository, safeBrowsingService, new DefaultSuspiciousUrlService(appProperties, hostLists),
+                        linkCheckService, reservedAliasService, settingsService),
                 apiKeyService,
                 urlRepository,
                 appProperties,

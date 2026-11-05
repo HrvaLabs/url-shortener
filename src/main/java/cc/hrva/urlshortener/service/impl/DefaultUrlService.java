@@ -479,7 +479,7 @@ public class DefaultUrlService implements UrlService {
     private void checkDestinationShape(final Url url) {
         urlValidator.longUrlInUrl(url);
         urlValidator.checkIfLongUrlIsValid(url);
-        urlValidator.checkIfLongUrlIsNotAShortener(url);
+        urlValidator.checkIfLongUrlIsNotOwnLink(url);
     }
 
     private LinkVerdict checkDestinationSafety(final Url url) {
@@ -668,7 +668,7 @@ public class DefaultUrlService implements UrlService {
     }
 
     private LinkVerdict checkDestinationToTurnOn(final Url url) {
-        urlValidator.checkIfLongUrlIsNotAShortener(url);
+        urlValidator.checkIfLongUrlIsNotOwnLink(url);
         final var verdict = urlValidator.checkIfDestinationNotBlocked(url);
         urlValidator.checkIfUrlSafe(url);
         return verdict;

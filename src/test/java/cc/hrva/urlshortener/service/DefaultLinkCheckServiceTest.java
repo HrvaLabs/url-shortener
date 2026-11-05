@@ -14,6 +14,9 @@ import cc.hrva.urlshortener.model.enums.SourceKind;
 import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
 import cc.hrva.urlshortener.repository.DomainRuleRepository;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
+import cc.hrva.urlshortener.service.blocklist.HostListing;
+import cc.hrva.urlshortener.service.blocklist.HostListing.BrandSite;
+import cc.hrva.urlshortener.service.blocklist.HostLists;
 import cc.hrva.urlshortener.service.blocklist.LinkListParser;
 import cc.hrva.urlshortener.service.impl.DefaultLinkCheckService;
 import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
@@ -91,6 +94,9 @@ class DefaultLinkCheckServiceTest {
     @Mock
     private SuspiciousUrlService suspiciousUrlService;
 
+    @Mock
+    private HostLists hostLists;
+
     @Captor
     private ArgumentCaptor<Map<Long, List<String>>> keysBySource;
 
@@ -106,6 +112,7 @@ class DefaultLinkCheckServiceTest {
         lenient().when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(sources);
         lenient().when(blocklistStore.matchingSources(anyMap())).thenAnswer(invocation -> matchingSources(invocation.getArgument(0)));
         lenient().when(domainReputationService.lookup(anyString())).thenReturn(ReputationResult.none());
+        lenient().when(hostLists.lookup(anyString())).thenReturn(new HostListing(false, false, BrandSite.NOT_LISTED));
         linkCheckService = new DefaultLinkCheckService(
                 domainRuleRepository, blocklistSourceRepository, blocklistStore, domainAgeService, domainReputationService, suspiciousUrlService,
                 settingsService);
@@ -223,6 +230,7 @@ class DefaultLinkCheckServiceTest {
     @ValueSource(strings = {"https://\u010dokolada.top/login", "https://xn--okolada-i6a.top/login"})
     void aYoungCroatianNameWithALoginLureIsBlockedForScamSignalsByTheRealHeuristics(final String longUrl) {
         young("xn--okolada-i6a.top");
+        when(hostLists.lookup("xn--okolada-i6a.top")).thenReturn(new HostListing(false, true, BrandSite.NOT_LISTED));
 
         assertThat(withRealHeuristics().check(longUrl)).isEqualTo(new LinkVerdict(
                 Outcome.BLOCK, List.of(YOUNG, LURE, "high-risk domain ending .top"), BlockReason.SCAM_SIGNALS, YOUNG + ", " + LURE));
@@ -261,10 +269,10 @@ class DefaultLinkCheckServiceTest {
 
     @Test
     void aSingleHeuristicIsFlagged() {
-        final var url = "https://tradicsummer.work.gd/";
-        heuristics(url, "free dynamic DNS host");
+        final var url = "https://njuskaio.cam/a/MAUB3vtf3O04TEep";
+        heuristics(url, "imitates njuskalo");
 
-        assertThat(verdictOf(url)).isEqualTo(new LinkVerdict(Outcome.FLAG, List.of("free dynamic DNS host"), null, null));
+        assertThat(verdictOf(url)).isEqualTo(new LinkVerdict(Outcome.FLAG, List.of("imitates njuskalo"), null, null));
     }
 
     @Test
@@ -746,7 +754,7 @@ class DefaultLinkCheckServiceTest {
 
     private DefaultLinkCheckService withRealHeuristics() {
         return new DefaultLinkCheckService(domainRuleRepository, blocklistSourceRepository, blocklistStore, domainAgeService,
-                domainReputationService, new DefaultSuspiciousUrlService(new AppProperties()), settingsService);
+                domainReputationService, new DefaultSuspiciousUrlService(new AppProperties(), hostLists), settingsService);
     }
 
     private void young(final String host) {

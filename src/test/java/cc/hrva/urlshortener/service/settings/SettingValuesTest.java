@@ -152,8 +152,9 @@ class SettingValuesTest {
                 .isEqualTo("New links, links turned back on and changed destinations are checked with Google Safe Browsing.");
         assertThat(SettingKey.BLOCKLIST_CHECK.getDescription()).isEqualTo("The enabled blocklists and Spamhaus, on new links, clicks, the nightly "
                 + "recheck, redirect hops, Allow-rule restores, custom-domain applications and the nightly custom-domain check. Domain rules always apply.");
-        assertThat(SettingKey.SUSPICIOUS_LINK_CHECK.getDescription()).isEqualTo("Lookalike brands, risky endings, login lures and young domains, "
-                + "on new links, the nightly recheck, redirect hops, Allow-rule restores, custom-domain applications and the nightly custom-domain check.");
+        assertThat(SettingKey.SUSPICIOUS_LINK_CHECK.getDescription()).isEqualTo("Lookalike brands, login lures and young domains, on new links, "
+                + "the nightly recheck, redirect hops, Allow-rule restores, custom-domain applications and the nightly custom-domain check. "
+                + "Risky endings and other shorteners only add to a reason found another way.");
     }
 
     @Test

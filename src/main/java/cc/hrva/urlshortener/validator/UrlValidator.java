@@ -13,7 +13,7 @@ public interface UrlValidator {
     void longUrlInUrl(Url url);
     void checkIfUrlSafe(Url url);
     void checkIfLongUrlIsValid(Url url);
-    void checkIfLongUrlIsNotAShortener(Url url);
+    void checkIfLongUrlIsNotOwnLink(Url url);
     LinkVerdict checkIfLongUrlIsNotBlocklisted(Url url);
     LinkVerdict destinationVerdict(Url url);
     void verifyUserAdminOrOwner(Url url);

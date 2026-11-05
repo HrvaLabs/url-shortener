@@ -564,13 +564,13 @@ class UpdateLinkFlowTest {
     }
 
     @Test
-    void anAdminsDestinationRefusedAsAShortenerLeavesTheLinkAsItWas() throws Exception {
-        when(suspiciousUrlService.isShortener("https://bit.ly/abc")).thenReturn(true);
+    void anAdminsDestinationToOurOwnHostIsRefusedAndLeavesTheLinkAsItWas() throws Exception {
+        when(suspiciousUrlService.isOwnLink("https://hrva.cc/abc")).thenReturn(true);
         final var before = jdbcTemplate.queryForMap("select * from url where id = ?", LINK);
 
-        mockMvc.perform(edit("admin-token", "{\"id\":" + LINK + ",\"longUrl\":\"https://bit.ly/abc\",\"visitLimit\":5}"))
+        mockMvc.perform(edit("admin-token", "{\"id\":" + LINK + ",\"longUrl\":\"https://hrva.cc/abc\",\"visitLimit\":5}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.detail").value("Links to other URL shorteners can't be shortened. Use the final destination instead."));
+                .andExpect(jsonPath("$.detail").value("Links to hrva.cc can't be shortened again. Use the final destination instead."));
 
         assertThat(jdbcTemplate.queryForMap("select * from url where id = ?", LINK)).isEqualTo(before);
     }

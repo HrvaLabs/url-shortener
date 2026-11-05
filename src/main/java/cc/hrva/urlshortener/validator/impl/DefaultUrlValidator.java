@@ -64,9 +64,9 @@ public class DefaultUrlValidator implements UrlValidator {
     }
 
     @Override
-    public void checkIfLongUrlIsNotAShortener(final Url url) {
-        if (suspiciousUrlService.isShortener(url.getLongUrl())) {
-            throw new UrlValidationException("Links to other URL shorteners can't be shortened. Use the final destination instead.");
+    public void checkIfLongUrlIsNotOwnLink(final Url url) {
+        if (suspiciousUrlService.isOwnLink(url.getLongUrl())) {
+            throw new UrlValidationException("Links to hrva.cc can't be shortened again. Use the final destination instead.");
         }
     }
 

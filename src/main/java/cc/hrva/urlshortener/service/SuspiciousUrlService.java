@@ -13,7 +13,8 @@ public interface SuspiciousUrlService {
     String REDIRECT_SEPARATOR = ": ";
 
     List<String> findReasons(String longUrl);
-    boolean isShortener(String longUrl);
+    boolean isOwnLink(String longUrl);
+    boolean isListedShortener(String longUrl);
     List<String> findTextReasons(String text);
     Optional<String> findImitatedBrand(String text);
     Optional<String> findBrandInHandle(String handle);

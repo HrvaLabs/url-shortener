@@ -21,6 +21,8 @@ import cc.hrva.urlshortener.repository.BioPageReviewRepository;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.service.blocklist.HostListing;
+import cc.hrva.urlshortener.service.blocklist.HostLists;
 import cc.hrva.urlshortener.service.bio.BioHandles;
 import cc.hrva.urlshortener.service.bio.BioPageLock;
 import cc.hrva.urlshortener.service.bio.BioPageResponses;
@@ -59,6 +61,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest(
@@ -318,7 +321,9 @@ class BioPageOwnerFlowTest {
         SuspiciousUrlService suspiciousUrlService() {
             final var appProperties = new AppProperties();
             appProperties.setServerUrl("https://hrva.cc");
-            return new DefaultSuspiciousUrlService(appProperties);
+            final var hostLists = mock(HostLists.class);
+            when(hostLists.lookup(anyString())).thenReturn(HostListing.unknown());
+            return new DefaultSuspiciousUrlService(appProperties, hostLists);
         }
 
     }
