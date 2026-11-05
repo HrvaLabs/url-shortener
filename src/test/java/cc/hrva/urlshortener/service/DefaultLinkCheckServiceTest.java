@@ -360,6 +360,16 @@ class DefaultLinkCheckServiceTest {
     }
 
     @Test
+    void noteAndTrustListsNeverReachTheVerdict() {
+        source(1, "HaGeZi URL shorteners", SourceKind.SHORTENERS, BlocklistAction.NOTE, "bit.ly");
+        source(2, "Tranco brand sites", SourceKind.BRAND_SITES, BlocklistAction.TRUST, "bit.ly");
+
+        assertThat(verdictOf("https://bit.ly/abc")).isEqualTo(CLEAN);
+        verify(blocklistStore, times(2)).matchingSources(keysBySource.capture());
+        assertThat(keysBySource.getAllValues()).allSatisfy(lookups -> assertThat(lookups).isEmpty());
+    }
+
+    @Test
     void oneRedisCallCarriesTheDomainCandidatesAndTheLinkKeysOfFlagAndBlockSources() {
         source(1, HAGEZI_FAKE, SourceKind.DOMAINS, BlocklistAction.BLOCK);
         source(2, HAGEZI_DYNDNS, SourceKind.DOMAINS, BlocklistAction.FLAG);

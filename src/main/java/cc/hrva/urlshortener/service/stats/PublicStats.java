@@ -63,7 +63,7 @@ public class PublicStats {
 
     private List<Blocklist> blocklists() {
         return blocklistSourceRepository.findByEnabledTrue().stream()
-                .filter(source -> source.getAction() != BlocklistAction.TRUST)
+                .filter(source -> source.getAction() == BlocklistAction.BLOCK || source.getAction() == BlocklistAction.FLAG)
                 .filter(source -> source.getDomainCount() != null && source.getDomainCount() > 0)
                 .map(source -> new Blocklist(source.getName(), source.getAction(), source.getDomainCount()))
                 .sorted(Comparator.comparingLong(Blocklist::entries).reversed().thenComparing(Blocklist::name))

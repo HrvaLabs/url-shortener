@@ -474,6 +474,10 @@ public class AppProperties {
         @Max(100_000)
         private int signInFormTopSites = 20_000;
 
+        @Min(1000)
+        @Max(1_000_000)
+        private int brandSitesTopSites = 150_000;
+
         @Min(0)
         @Max(365)
         private int signInFormNewAccountDays = 30;

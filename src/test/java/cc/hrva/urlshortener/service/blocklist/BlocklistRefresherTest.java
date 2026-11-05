@@ -56,6 +56,7 @@ class BlocklistRefresherTest {
             """;
     private static final String TOP_20000 = "https://tranco-list.eu/download/K9YXW/20000";
     private static final String TOP_1000 = "https://tranco-list.eu/download/K9YXW/1000";
+    private static final String ENDINGS = "https://lists.example/endings.txt";
     private static final String ETAG = "\"K9YXW-20000\"";
     private static final String NO_DOWNLOAD_LINK = "No download link found. Use the Tranco API address of the latest list.";
     private static final long MEGABYTE = 1024L * 1024L;
@@ -87,7 +88,7 @@ class BlocklistRefresherTest {
     void setUp() {
         final var memoryGuard = new BlocklistMemoryGuard(blocklistStore, blocklistSourceRepository, new AppProperties());
         blocklistRefresher = new BlocklistRefresher(blocklistSourceRepository, blocklistStore, memoryGuard, publicHttpFetcher,
-                new BlocklistParser(), new LinkListParser(), new TopSitesParser(), settingsService, eventPublisher, blocklistHealth);
+                new BlocklistParser(), new LinkListParser(), new TopSitesParser(), new EndingsParser(), new BrandSitesParser(new TopSitesParser()), settingsService, eventPublisher, blocklistHealth);
     }
 
     @Test
@@ -121,6 +122,47 @@ class BlocklistRefresherTest {
         blocklistRefresher.refresh(source, RefreshTrigger.MANUAL);
 
         verify(blocklistStore).replace(TRANCO, Set.copyOf(rankedDomainNames(1000)));
+    }
+
+    @Test
+    void aBrandSitesListUsesItsOwnDepth() {
+        settingsService.change(SettingKey.BRAND_SITES_TOP_SITES, NODES.numberNode(1000), "admin@hrva.cc");
+        final var source = stored(tranco().kind(SourceKind.BRAND_SITES).build());
+        serves(API, LATEST);
+        serves(TOP_1000, "1,google.com\r\n2,example.com\r\n3,amazon.de\r\n4,accounts.google.com\r\n");
+        loadsInto(source);
+        redisHasRoom();
+
+        blocklistRefresher.refresh(source, RefreshTrigger.MANUAL);
+
+        verify(publicHttpFetcher).fetch(eq(TOP_1000), eq(100L * MEGABYTE), isNull(), isNull(), eq(Duration.ofSeconds(60)));
+        verify(blocklistStore).replace(TRANCO, Set.of("google.com", "amazon.de"));
+        verify(blocklistSourceRepository).recordLoadedList(eq(TRANCO), eq(SourceKind.BRAND_SITES), any(), isNull(), eq(TOP_1000), eq(2L), isNull(),
+                isNull(), isNull());
+    }
+
+    @Test
+    void anEndingsListIsParsedAsEndings() {
+        final var source = stored(tranco().kind(SourceKind.ENDINGS).action(BlocklistAction.NOTE).url(ENDINGS).build());
+        serves(ENDINGS, "# Title: spam tlds\n*.top\n.CAM\nexample.com\n");
+        loadsInto(source);
+        redisHasRoom();
+
+        blocklistRefresher.refresh(source, RefreshTrigger.MANUAL);
+
+        verify(blocklistStore).replace(TRANCO, Set.of("top", "cam"));
+    }
+
+    @Test
+    void aShortenerListIsParsedAsDomains() {
+        final var source = stored(tranco().kind(SourceKind.SHORTENERS).action(BlocklistAction.NOTE).url(ENDINGS).build());
+        serves(ENDINGS, "bit.ly\n*.t.co\n");
+        loadsInto(source);
+        redisHasRoom();
+
+        blocklistRefresher.refresh(source, RefreshTrigger.MANUAL);
+
+        verify(blocklistStore).replace(TRANCO, Set.of("bit.ly", "t.co"));
     }
 
     @Test

@@ -4,6 +4,7 @@ public enum BlocklistAction {
 
     BLOCK,
     FLAG,
-    TRUST
+    TRUST,
+    NOTE
 
 }

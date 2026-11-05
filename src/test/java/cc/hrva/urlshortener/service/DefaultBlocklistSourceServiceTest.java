@@ -18,6 +18,8 @@ import cc.hrva.urlshortener.service.blocklist.BlocklistConfigurationChangedEvent
 import cc.hrva.urlshortener.service.blocklist.BlocklistHealth;
 import cc.hrva.urlshortener.service.blocklist.BlocklistMemoryGuard;
 import cc.hrva.urlshortener.service.blocklist.BlocklistParser;
+import cc.hrva.urlshortener.service.blocklist.BrandSitesParser;
+import cc.hrva.urlshortener.service.blocklist.EndingsParser;
 import cc.hrva.urlshortener.service.blocklist.BlocklistRefresher;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
 import cc.hrva.urlshortener.service.blocklist.LinkListParser;
@@ -118,7 +120,9 @@ class DefaultBlocklistSourceServiceTest {
     private static final long TRANCO = 10L;
     private static final String TRANCO_API = "https://tranco-list.eu/api/lists/date/latest?subdomains=true";
     private static final String TOP_SITES_ONLY_TRUST = "Top sites lists can only mark real sign-in pages";
-    private static final String TRUST_ONLY_TOP_SITES = "Only a top sites list can mark real sign-in pages";
+    private static final String TRUST_ONLY_TOP_SITES = "Domain and link lists can only block links or send them to review";
+    private static final String BRAND_SITES_ONLY_TRUST = "Brand sites lists can only mark brands' own sites";
+    private static final String NOTE_ONLY = "Shortener and ending lists can only add a reason";
 
     @TempDir
     private Path downloads;
@@ -150,7 +154,7 @@ class DefaultBlocklistSourceServiceTest {
         fetcher = new FakeFetcher(downloads);
         final var memoryGuard = new BlocklistMemoryGuard(blocklistStore, blocklistSourceRepository, new AppProperties());
         final var refresher = new BlocklistRefresher(blocklistSourceRepository, blocklistStore, memoryGuard, fetcher,
-                new BlocklistParser(), new LinkListParser(), new TopSitesParser(), SettingsServiceFixtures.defaults(new AppProperties()), alertPublisher,
+                new BlocklistParser(), new LinkListParser(), new TopSitesParser(), new EndingsParser(), new BrandSitesParser(new TopSitesParser()), SettingsServiceFixtures.defaults(new AppProperties()), alertPublisher,
                 blocklistHealth);
         blocklistSourceService = new DefaultBlocklistSourceService(blocklistSourceRepository, blocklistStore, refresher, eventPublisher,
                 blocklistHealth, sendingEmailService);
@@ -1068,6 +1072,26 @@ class DefaultBlocklistSourceServiceTest {
         assertRefused(new BlocklistSourceDto("Trusted", MAIN, SourceKind.DOMAINS, BlocklistAction.TRUST, null, null, null), TRUST_ONLY_TOP_SITES);
         assertRefused(new BlocklistSourceDto("Trusted", OPENPHISH, SourceKind.LINKS, BlocklistAction.TRUST, null, null, null), TRUST_ONLY_TOP_SITES);
         assertRefused(new BlocklistSourceDto("Trusted", MAIN, null, BlocklistAction.TRUST, null, null, null), TRUST_ONLY_TOP_SITES);
+    }
+
+    @Test
+    void aBrandSitesListMustMarkBrandSites() {
+        assertRefused(new BlocklistSourceDto("Brands", TRANCO_API, SourceKind.BRAND_SITES, BlocklistAction.BLOCK, null, 24, null), BRAND_SITES_ONLY_TRUST);
+        assertRefused(new BlocklistSourceDto("Brands", TRANCO_API, SourceKind.BRAND_SITES, BlocklistAction.NOTE, null, 24, null), BRAND_SITES_ONLY_TRUST);
+    }
+
+    @Test
+    void shortenerAndEndingListsOnlyAddAReason() {
+        assertRefused(new BlocklistSourceDto("Shorteners", MAIN, SourceKind.SHORTENERS, BlocklistAction.FLAG, null, 24, null), NOTE_ONLY);
+        assertRefused(new BlocklistSourceDto("Endings", MAIN, SourceKind.ENDINGS, BlocklistAction.BLOCK, null, 24, null), NOTE_ONLY);
+        assertRefused(new BlocklistSourceDto("Endings", MAIN, SourceKind.ENDINGS, BlocklistAction.TRUST, null, 24, null), NOTE_ONLY);
+    }
+
+    @Test
+    void domainAndLinkListsOnlyBlockOrReview() {
+        assertRefused(new BlocklistSourceDto("Domains", MAIN, SourceKind.DOMAINS, BlocklistAction.NOTE, null, 24, null), TRUST_ONLY_TOP_SITES);
+        assertRefused(new BlocklistSourceDto("Links", OPENPHISH, SourceKind.LINKS, BlocklistAction.NOTE, null, 24, null), TRUST_ONLY_TOP_SITES);
+        assertRefused(new BlocklistSourceDto("Links", OPENPHISH, SourceKind.LINKS, BlocklistAction.TRUST, null, 24, null), TRUST_ONLY_TOP_SITES);
     }
 
     @Test

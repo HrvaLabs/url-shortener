@@ -33,6 +33,8 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.blocklist.BlocklistHealth;
 import cc.hrva.urlshortener.service.blocklist.BlocklistMemoryGuard;
 import cc.hrva.urlshortener.service.blocklist.BlocklistParser;
+import cc.hrva.urlshortener.service.blocklist.BrandSitesParser;
+import cc.hrva.urlshortener.service.blocklist.EndingsParser;
 import cc.hrva.urlshortener.service.blocklist.BlocklistRefresher;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
 import cc.hrva.urlshortener.service.blocklist.LinkListParser;
@@ -432,6 +434,8 @@ class RefreshBlocklistSourceFlowTest {
             BlocklistParser.class,
             LinkListParser.class,
             TopSitesParser.class,
+            EndingsParser.class,
+            BrandSitesParser.class,
             AdminAuditAspect.class,
             DefaultAuditLogService.class
     })

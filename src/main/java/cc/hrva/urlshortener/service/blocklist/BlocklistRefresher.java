@@ -63,6 +63,8 @@ public class BlocklistRefresher {
     private final BlocklistParser blocklistParser;
     private final LinkListParser linkListParser;
     private final TopSitesParser topSitesParser;
+    private final EndingsParser endingsParser;
+    private final BrandSitesParser brandSitesParser;
     private final SettingsService settingsService;
     private final ApplicationEventPublisher eventPublisher;
     private final BlocklistHealth blocklistHealth;
@@ -94,7 +96,7 @@ public class BlocklistRefresher {
         for (final var attempt : attempts) {
             try {
                 final var limit = entryLimitOf(source.getKind());
-                final var list = source.getKind() == SourceKind.TOP_SITES
+                final var list = source.getKind().ranked()
                         ? new Attempt(attempt.label(), topSitesUrl(attempt.url(), limit))
                         : attempt;
                 final var conditional = sendsValidators(source, list.url());
@@ -221,7 +223,11 @@ public class BlocklistRefresher {
     }
 
     private int entryLimitOf(final SourceKind kind) {
-        return kind == SourceKind.TOP_SITES ? settingsService.number(SettingKey.SIGN_IN_FORM_TOP_SITES) : MAX_ENTRIES;
+        return switch (kind) {
+            case TOP_SITES -> settingsService.number(SettingKey.SIGN_IN_FORM_TOP_SITES);
+            case BRAND_SITES -> settingsService.number(SettingKey.BRAND_SITES_TOP_SITES);
+            default -> MAX_ENTRIES;
+        };
     }
 
     private String topSitesUrl(final String apiUrl, final int sites) {
@@ -250,9 +256,11 @@ public class BlocklistRefresher {
     private ParsedBlocklist parse(final SourceKind kind, final Path body, final int limit) {
         try (final var reader = new BufferedReader(new InputStreamReader(Files.newInputStream(body), StandardCharsets.UTF_8))) {
             return switch (kind) {
-                case DOMAINS -> blocklistParser.parse(reader, limit);
+                case DOMAINS, SHORTENERS -> blocklistParser.parse(reader, limit);
                 case LINKS -> linkListParser.parse(reader, limit);
                 case TOP_SITES -> topSitesParser.parse(reader, limit);
+                case ENDINGS -> endingsParser.parse(reader, limit);
+                case BRAND_SITES -> brandSitesParser.parse(reader, limit);
             };
         } catch (final IOException exception) {
             throw new UncheckedIOException(exception);

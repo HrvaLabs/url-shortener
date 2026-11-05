@@ -79,7 +79,21 @@ class DynamicLinkChecksSchemaTest {
                         hagezi("HaGeZi Fake", BlocklistAction.BLOCK, "fake-onlydomains.txt"),
                         hagezi("HaGeZi badware hosters", BlocklistAction.FLAG, "hoster-onlydomains.txt"),
                         hagezi("HaGeZi DynDNS", BlocklistAction.FLAG, "dyndns-onlydomains.txt"),
-                        hagezi("HaGeZi URL shorteners", BlocklistAction.FLAG, "urlshortener-onlydomains.txt"));
+                        tuple("HaGeZi URL shorteners", SourceKind.SHORTENERS, BlocklistAction.NOTE, HAGEZI_MIRROR + "urlshortener-onlydomains.txt",
+                                List.of(HAGEZI_GITHUB + "urlshortener-onlydomains.txt"), 6));
+    }
+
+    @Test
+    void seedsTheRiskyEndingsAndTheBrandSites() {
+        assertThat(blocklistSourceRepository.findAll(Sort.by("id")))
+                .filteredOn(source -> source.getKind() == SourceKind.ENDINGS || source.getKind() == SourceKind.BRAND_SITES)
+                .extracting(BlocklistSource::getName, BlocklistSource::getKind, BlocklistSource::getAction, BlocklistSource::getUrl,
+                        BlocklistSource::getFallbackUrls, BlocklistSource::isEnabled, BlocklistSource::getRefreshIntervalHours)
+                .containsExactly(
+                        tuple("HaGeZi risky endings", SourceKind.ENDINGS, BlocklistAction.NOTE, HAGEZI_MIRROR + "spam-tlds-onlydomains.txt",
+                                List.of(HAGEZI_GITHUB + "spam-tlds-onlydomains.txt"), true, 24),
+                        tuple("Tranco brand sites", SourceKind.BRAND_SITES, BlocklistAction.TRUST,
+                                "https://tranco-list.eu/api/lists/date/latest?subdomains=true", List.of(), true, 24));
     }
 
     @Test
@@ -97,8 +111,8 @@ class DynamicLinkChecksSchemaTest {
                         tuple("Phishing.Database domains", SourceKind.DOMAINS, BlocklistAction.FLAG,
                                 "https://raw.githubusercontent.com/Phishing-Database/Phishing.Database/master/phishing-domains-ACTIVE.txt",
                                 List.of(), 24));
-        assertThat(blocklistSourceRepository.findAll()).filteredOn(source -> source.getAction() != BlocklistAction.TRUST).hasSize(9);
-        assertThat(blocklistSourceRepository.findByEnabledTrue()).filteredOn(source -> source.getAction() != BlocklistAction.TRUST).hasSize(8);
+        assertThat(blocklistSourceRepository.findAll()).filteredOn(source -> source.getAction() != BlocklistAction.TRUST).hasSize(10);
+        assertThat(blocklistSourceRepository.findByEnabledTrue()).filteredOn(source -> source.getAction() != BlocklistAction.TRUST).hasSize(9);
     }
 
     @Test

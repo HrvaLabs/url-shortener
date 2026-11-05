@@ -124,7 +124,10 @@ public enum SettingKey {
             365, "days"),
     SIGN_IN_FORM_TOP_SITES(SettingGroup.SAFETY, "Real sign-in pages: top sites",
             "How many of the most-visited hosts in Tranco's list with subdomains count as real sign-in pages. The next refresh of the "
-                    + "Tranco source downloads that many.", null, 1000, 100_000, "sites");
+                    + "Tranco source downloads that many.", null, 1000, 100_000, "sites"),
+    BRAND_SITES_TOP_SITES(SettingGroup.SAFETY, "Brands' own sites: top sites",
+            "How many of the most-visited hosts in Tranco's list with subdomains are searched for brands' own sites, such as njuskalo.hr or "
+                    + "amazon.de. The next refresh of the Tranco brand sites source downloads that many.", null, 1000, 1_000_000, "sites");
 
     private final SettingGroup group;
     private final SettingType type;

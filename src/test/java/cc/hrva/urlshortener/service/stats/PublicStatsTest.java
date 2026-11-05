@@ -197,6 +197,17 @@ class PublicStatsTest {
     }
 
     @Test
+    void onlyBlockingAndFlaggingListsArePublic() {
+        when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(
+                source(5L, "HaGeZi TIF medium", BlocklistAction.BLOCK, 400_000L),
+                source(6L, "HaGeZi URL shorteners", BlocklistAction.NOTE, 9_000L),
+                source(10L, "Tranco brand sites", BlocklistAction.TRUST, 100L)));
+
+        assertThat(publicStatsAt(NOW).collect().blocklists())
+                .containsExactly(new Blocklist("HaGeZi TIF medium", BlocklistAction.BLOCK, 400_000));
+    }
+
+    @Test
     void blocklistsLeaveOutTheListsOfRealSignInDomains() {
         when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(
                 source(5L, "HaGeZi TIF medium", BlocklistAction.BLOCK, 400_000L),

@@ -229,12 +229,7 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
         if (blocklistSourceDto.action() == null) {
             throw new UrlValidationException("Choose whether the list blocks or flags links");
         }
-        if (kind == SourceKind.TOP_SITES && blocklistSourceDto.action() != BlocklistAction.TRUST) {
-            throw new UrlValidationException("Top sites lists can only mark real sign-in pages");
-        }
-        if (kind != SourceKind.TOP_SITES && blocklistSourceDto.action() == BlocklistAction.TRUST) {
-            throw new UrlValidationException("Only a top sites list can mark real sign-in pages");
-        }
+        validateAction(kind, blocklistSourceDto.action());
         final var refreshIntervalHours = blocklistSourceDto.refreshIntervalHours();
         if (refreshIntervalHours != null && (refreshIntervalHours < 1 || refreshIntervalHours > MAX_REFRESH_INTERVAL_HOURS)) {
             throw new UrlValidationException("The refresh interval must be between 1 and " + MAX_REFRESH_INTERVAL_HOURS + " hours");
@@ -245,6 +240,22 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
         }
         for (int index = 0; index < fallbackUrls.size(); index++) {
             validateListUrl(fallbackUrls.get(index), "Fallback URL " + (index + 1));
+        }
+    }
+
+    private static void validateAction(final SourceKind kind, final BlocklistAction action) {
+        switch (kind) {
+            case TOP_SITES -> require(action == BlocklistAction.TRUST, "Top sites lists can only mark real sign-in pages");
+            case BRAND_SITES -> require(action == BlocklistAction.TRUST, "Brand sites lists can only mark brands' own sites");
+            case SHORTENERS, ENDINGS -> require(action == BlocklistAction.NOTE, "Shortener and ending lists can only add a reason");
+            case DOMAINS, LINKS -> require(action == BlocklistAction.BLOCK || action == BlocklistAction.FLAG,
+                    "Domain and link lists can only block links or send them to review");
+        }
+    }
+
+    private static void require(final boolean valid, final String message) {
+        if (!valid) {
+            throw new UrlValidationException(message);
         }
     }
 

@@ -73,7 +73,7 @@ class AccountSignInCheckSchemaTest {
         assertThat(blocklistSourceRepository.findAll())
                 .filteredOn(source -> source.getAction() == BlocklistAction.TRUST)
                 .extracting(BlocklistSource::getName)
-                .containsExactly("Tranco top sites");
+                .containsExactly("Tranco top sites", "Tranco brand sites");
     }
 
     @Test

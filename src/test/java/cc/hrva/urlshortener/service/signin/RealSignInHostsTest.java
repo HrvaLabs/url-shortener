@@ -77,6 +77,13 @@ class RealSignInHostsTest {
     }
 
     @Test
+    void aBrandSitesListIsNotARealSignInList() {
+        source(11L, SourceKind.BRAND_SITES, BlocklistAction.TRUST, "njuskalo.hr");
+
+        assertThat(realSignInHosts.isRealSignInHost("njuskalo.hr")).isFalse();
+    }
+
+    @Test
     void aSubdomainOfAListedDomainIsNotReal() {
         trancoLists("sharepoint.com", "google.com", "accounts.google.com");
 

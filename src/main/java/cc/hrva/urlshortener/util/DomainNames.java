@@ -74,6 +74,12 @@ public final class DomainNames {
                 .orElse(host);
     }
 
+    public static String registryNameOf(final String host) {
+        final var registryDomain = registryDomain(host);
+        final var firstDot = registryDomain.indexOf('.');
+        return firstDot < 0 ? registryDomain : registryDomain.substring(0, firstDot);
+    }
+
     public static boolean isUnderRegistrySuffix(final String host) {
         return internetDomainName(host).filter(InternetDomainName::isUnderRegistrySuffix).isPresent();
     }

@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.service.signin;
 
 import cc.hrva.urlshortener.model.BlocklistSource;
 import cc.hrva.urlshortener.model.enums.BlocklistAction;
+import cc.hrva.urlshortener.model.enums.SourceKind;
 import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
 import cc.hrva.urlshortener.util.DomainNames;
@@ -29,7 +30,7 @@ public class RealSignInHosts {
         final var lookup = List.of(listedForm);
         try {
             final var trustedSources = blocklistSourceRepository.findByEnabledTrue().stream()
-                    .filter(source -> source.getAction() == BlocklistAction.TRUST)
+                    .filter(source -> source.getAction() == BlocklistAction.TRUST && source.getKind() == SourceKind.TOP_SITES)
                     .collect(Collectors.toMap(BlocklistSource::getId, source -> lookup));
             return !blocklistStore.matchingSources(trustedSources).isEmpty();
         } catch (final RuntimeException exception) {

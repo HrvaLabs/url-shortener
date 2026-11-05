@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="053-shortener-list-adds-a-reason">
+        <update tableName="blocklist_source">
+            <column name="kind" value="SHORTENERS"/>
+            <column name="action" value="NOTE"/>
+            <where>kind = 'DOMAINS' AND (name = 'HaGeZi URL shorteners' OR url LIKE '%/urlshortener-onlydomains.txt')</where>
+        </update>
+        <rollback>
+            <update tableName="blocklist_source">
+                <column name="kind" value="DOMAINS"/>
+                <column name="action" value="FLAG"/>
+                <where>kind = 'SHORTENERS' AND (name = 'HaGeZi URL shorteners' OR url LIKE '%/urlshortener-onlydomains.txt')</where>
+            </update>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="053-blocklist-source-risky-endings">
+        <insert tableName="blocklist_source">
+            <column name="name" value="HaGeZi risky endings"/>
+            <column name="url" value="https://hagezi-mirror.dnsbunker.org/wildcard/spam-tlds-onlydomains.txt"/>
+            <column name="fallback_urls" value="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/spam-tlds-onlydomains.txt"/>
+            <column name="kind" value="ENDINGS"/>
+            <column name="action" value="NOTE"/>
+            <column name="enabled" valueBoolean="true"/>
+            <column name="refresh_interval_hours" valueNumeric="24"/>
+        </insert>
+        <rollback>
+            <delete tableName="blocklist_source">
+                <where>name = 'HaGeZi risky endings' AND kind = 'ENDINGS'</where>
+            </delete>
+        </rollback>
+    </changeSet>
+
+    <changeSet author="khrvacic" id="053-blocklist-source-brand-sites">
+        <insert tableName="blocklist_source">
+            <column name="name" value="Tranco brand sites"/>
+            <column name="url" value="https://tranco-list.eu/api/lists/date/latest?subdomains=true"/>
+            <column name="kind" value="BRAND_SITES"/>
+            <column name="action" value="TRUST"/>
+            <column name="enabled" valueBoolean="true"/>
+            <column name="refresh_interval_hours" valueNumeric="24"/>
+        </insert>
+        <rollback>
+            <delete tableName="blocklist_source">
+                <where>name = 'Tranco brand sites' AND kind = 'BRAND_SITES'</where>
+            </delete>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
