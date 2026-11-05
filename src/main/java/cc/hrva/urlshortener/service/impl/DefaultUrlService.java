@@ -636,7 +636,7 @@ public class DefaultUrlService implements UrlService {
         urlValidator.checkIfUrlNotBlocked(url);
         requireCanTurnOn(url, url.getVisitLimit(), url.getExpirationDate());
         final var verdict = checkDestinationToTurnOn(url);
-        final var queueFlagged = !AdminTwoStep.hasAdminPowers(userService.getUserFromToken());
+        final var byAdmin = AdminTwoStep.hasAdminPowers(userService.getUserFromToken());
 
         final var activated = Objects.requireNonNull(transactionOperations.execute(status -> {
             final var current = reloadUnlessBlockedSince(url, blockAtStart);
@@ -648,12 +648,15 @@ public class DefaultUrlService implements UrlService {
             current.setBlockDetail(null);
             current.setBlockedAt(null);
             final var saved = urlRepository.save(activateUrl(current));
-            if (queueFlagged) {
+            if (!byAdmin) {
                 queueIfFlagged(saved, verdict);
             }
             return UrlResponse.from(saved);
         }));
         checkRedirectsLater(activated.id());
+        if (!byAdmin) {
+            checkAccountSignInFormLater(activated, verdict, url.getOwner());
+        }
         return activated;
     }
 
@@ -742,8 +745,8 @@ public class DefaultUrlService implements UrlService {
         if (destinationChanged || turnOn) {
             checkRedirectsLater(updated.id());
         }
-        if (destinationChanged && !editor.admin()) {
-            checkAccountSignInFormLater(updated, verdict, editor.user());
+        if ((destinationChanged || turnOn) && !editor.admin()) {
+            checkAccountSignInFormLater(updated, destinationChanged ? verdict : turnOnVerdict, editor.user());
         }
         if (destinationChanged) {
             reportCreated(updated, CreatedLink.creatorOf(editor.user().getId(), null), verdict);

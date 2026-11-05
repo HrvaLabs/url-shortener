@@ -2247,6 +2247,79 @@ class UrlServiceTest {
     }
 
     @Test
+    void anOwnersTurnOnSchedulesTheAccountCheck() {
+        final var scheduledInTransaction = new AtomicReference<Boolean>();
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/menu").visits(0L).active(false).owner(OWNER).build();
+        when(userService.getUserFromToken()).thenReturn(OWNER);
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(linkCheckService.check("https://example.com/menu")).thenReturn(LinkVerdict.clean());
+        recordTransactionDuringAccountCheck(7L, scheduledInTransaction);
+
+        final var result = transactionalUrlService().activateUrl(7L);
+
+        assertThat(result.active()).isTrue();
+        assertThat(scheduledInTransaction).hasValue(false);
+        verify(signInFormCheckService, never()).checkLater(anyLong());
+    }
+
+    @Test
+    void anEditThatTurnsALinkOnSchedulesIt() {
+        final var off = Url.builder().id(7L).shortUrl("abc").longUrl("https://same.example").visits(0L).active(false).owner(OWNER).build();
+        final var edited = Url.builder().id(7L).shortUrl("abc").longUrl("https://same.example").visits(0L).build();
+        final var turnOn = UrlUpdateDto.builder().id(7L).active(true).build();
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(off));
+        when(urlRepository.save(off)).thenReturn(off);
+        when(urlUpdateDtoToUrlConverter.convert(turnOn)).thenReturn(edited);
+        when(apiKeyService.fetchApiKeyByKey("apikey")).thenReturn(ApiKey.builder().owner(OWNER).build());
+
+        urlService.updateUrl(turnOn, "apikey");
+        off.setActive(false);
+        when(userService.getUserFromToken()).thenReturn(OWNER);
+        urlService.updateUrl(turnOn, null);
+
+        final var order = inOrder(urlRepository, signInFormCheckService);
+        order.verify(urlRepository).save(off);
+        order.verify(signInFormCheckService).checkAccountLinkLater(7L);
+        order.verify(urlRepository).save(off);
+        order.verify(signInFormCheckService).checkAccountLinkLater(7L);
+    }
+
+    @Test
+    void anAdminsTurnOnDoesNot() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://same.example").visits(0L).active(false).owner(OWNER).build();
+        final var edited = Url.builder().id(7L).shortUrl("abc").longUrl("https://same.example").visits(0L).build();
+        final var turnOn = UrlUpdateDto.builder().id(7L).active(true).build();
+        when(userService.getUserFromToken()).thenReturn(admin());
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(urlUpdateDtoToUrlConverter.convert(turnOn)).thenReturn(edited);
+
+        assertThat(urlService.activateUrl(7L).active()).isTrue();
+        url.setActive(false);
+        urlService.updateUrl(turnOn, null);
+
+        verifyNoInteractions(signInFormCheckService, newAccounts, moderationService);
+    }
+
+    @Test
+    void aFullQueueOnTurnOnHoldsANewAccountsLink() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://example.com/menu").visits(0L).active(false).owner(OWNER).build();
+        when(userService.getUserFromToken()).thenReturn(OWNER);
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        org.mockito.Mockito.doThrow(new TaskRejectedException("Executor did not accept the task"))
+                .when(signInFormCheckService).checkAccountLinkLater(7L);
+        when(newAccounts.isNew(OWNER)).thenReturn(true);
+        when(moderationService.holdOwnedLinkForSignInForm(anyLong(), anyString(), anyString(), anyString())).thenReturn(true);
+
+        assertThat(urlService.activateUrl(7L).active()).isTrue();
+
+        verify(moderationService).holdOwnedLinkForSignInForm(7L, "https://example.com/menu", "the check couldn't run",
+                ReviewReasons.SIGN_IN_CHECK_COULD_NOT_RUN);
+    }
+
+    @Test
     void aLinkHeldForASignInFormAnswersThatItIsBeingChecked() {
         final var url = storedLink().active(false).warningPage(true).blockReason(BlockReason.SIGN_IN_FORM).blockDetail("a password field").build();
 
