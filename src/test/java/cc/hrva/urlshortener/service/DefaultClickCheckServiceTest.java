@@ -58,6 +58,7 @@ class DefaultClickCheckServiceTest {
     private static final BlocklistSource OPENPHISH = source(2L, "OpenPhish", SourceKind.LINKS, BlocklistAction.BLOCK);
     private static final BlocklistSource HOSTERS = source(3L, "HaGeZi badware hosters", SourceKind.DOMAINS, BlocklistAction.FLAG);
     private static final BlocklistSource PHISHING_ARMY = source(5L, "Phishing Army", SourceKind.DOMAINS, BlocklistAction.BLOCK);
+    private static final BlocklistSource TRANCO = source(10L, "Tranco top sites", SourceKind.TOP_SITES, BlocklistAction.TRUST);
 
     @Mock
     private BlocklistSourceRepository blocklistSourceRepository;
@@ -114,6 +115,17 @@ class DefaultClickCheckServiceTest {
         clickCheckService.reload();
 
         assertThat(clickCheckService.mayRedirect(URL_ID, PHISHING_LINK)).isTrue();
+
+        verifyNoInteractions(blocklistStore, moderationService);
+    }
+
+    @Test
+    void aTrustListIsNeverAsked() {
+        lists(TRANCO);
+        clickCheckService.reload();
+
+        assertThat(clickCheckService.mayRedirect(URL_ID, "https://accounts.google.com/signin")).isTrue();
+        assertThat(clickCheckService.anyBlocked(List.of("https://accounts.google.com/signin"))).isFalse();
 
         verifyNoInteractions(blocklistStore, moderationService);
     }

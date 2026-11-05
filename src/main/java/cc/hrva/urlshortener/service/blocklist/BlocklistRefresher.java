@@ -7,7 +7,9 @@ import cc.hrva.urlshortener.exception.CommonException;
 import cc.hrva.urlshortener.model.BlocklistSource;
 import cc.hrva.urlshortener.model.enums.SourceKind;
 import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
+import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
+import cc.hrva.urlshortener.service.settings.SettingKey;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -24,12 +26,15 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.json.JsonMapper;
 
 @Slf4j
 @Component
@@ -37,6 +42,7 @@ import org.springframework.stereotype.Component;
 public class BlocklistRefresher {
 
     private static final long MAX_BYTES = 100L * 1024 * 1024;
+    private static final long MAX_API_ANSWER_BYTES = 64L * 1024;
     private static final int MAX_ENTRIES = 5_000_000;
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(60);
     private static final String ERROR_SEPARATOR = "; ";
@@ -45,6 +51,10 @@ public class BlocklistRefresher {
     private static final long MIN_GUARDED_ENTRIES = 1000;
     private static final double MIN_KEPT_SHARE = 0.5;
     private static final String SHRUNK = "The new download has %,d entries, less than half of the %,d loaded before. Kept the old list.";
+    private static final String NO_DOWNLOAD_LINK = "No download link found. Use the Tranco API address of the latest list.";
+    private static final String NO_LIST_SIZE = "The download link doesn't end in a list size.";
+    private static final Pattern LIST_SIZE = Pattern.compile("/\\d+$");
+    private static final JsonMapper JSON = JsonMapper.shared();
 
     private final BlocklistSourceRepository blocklistSourceRepository;
     private final BlocklistStore blocklistStore;
@@ -52,6 +62,8 @@ public class BlocklistRefresher {
     private final PublicHttpFetcher publicHttpFetcher;
     private final BlocklistParser blocklistParser;
     private final LinkListParser linkListParser;
+    private final TopSitesParser topSitesParser;
+    private final SettingsService settingsService;
     private final ApplicationEventPublisher eventPublisher;
     private final BlocklistHealth blocklistHealth;
     private final Set<Long> refreshing = ConcurrentHashMap.newKeySet();
@@ -81,16 +93,20 @@ public class BlocklistRefresher {
         final var errors = new ArrayList<String>();
         for (final var attempt : attempts) {
             try {
-                final var conditional = sendsValidators(source, attempt.url());
-                final var fetched = publicHttpFetcher.fetch(attempt.url(), MAX_BYTES,
+                final var limit = entryLimitOf(source.getKind());
+                final var list = source.getKind() == SourceKind.TOP_SITES
+                        ? new Attempt(attempt.label(), topSitesUrl(attempt.url(), limit))
+                        : attempt;
+                final var conditional = sendsValidators(source, list.url());
+                final var fetched = publicHttpFetcher.fetch(list.url(), MAX_BYTES,
                         conditional ? source.getEtag() : null, conditional ? source.getLastModified() : null, REQUEST_TIMEOUT);
                 if (fetched.notModified()) {
                     log.info("Blocklist source {} is unchanged ({})", source.getName(), attempt.label());
                     return new Download(errors, null, true);
                 }
-                final var parsed = parse(source.getKind(), fetched.body());
-                refuseShrunkenList(source, parsed, trigger);
-                return new Download(errors, new Loaded(attempt, parsed, fetched), false);
+                final var parsed = parse(source.getKind(), fetched.body(), limit);
+                refuseShrunkenList(source, parsed, trigger, limit);
+                return new Download(errors, new Loaded(list, parsed, fetched), false);
             } catch (final RuntimeException exception) {
                 final var message = describe(exception);
                 log.warn("Blocklist source {} could not be loaded ({}): {}", source.getName(), attempt.label(), message);
@@ -172,10 +188,10 @@ public class BlocklistRefresher {
         return Optional.empty();
     }
 
-    private void refuseShrunkenList(final BlocklistSource source, final ParsedBlocklist list, final RefreshTrigger trigger) {
+    private void refuseShrunkenList(final BlocklistSource source, final ParsedBlocklist list, final RefreshTrigger trigger, final int limit) {
         final var loadedBefore = source.getDomainCount();
-        if (trigger != RefreshTrigger.SCHEDULED || list.declaredEntries() != null || loadedBefore == null
-                || loadedBefore < MIN_GUARDED_ENTRIES || list.entries().size() >= loadedBefore * MIN_KEPT_SHARE || !holdsASet(source)) {
+        if (trigger != RefreshTrigger.SCHEDULED || list.declaredEntries() != null || loadedBefore == null || loadedBefore < MIN_GUARDED_ENTRIES
+                || list.entries().size() >= Math.min(loadedBefore, limit) * MIN_KEPT_SHARE || !holdsASet(source)) {
             return;
         }
         throw new BlocklistFormatException(String.format(Locale.ROOT, SHRUNK, list.entries().size(), loadedBefore));
@@ -204,9 +220,40 @@ public class BlocklistRefresher {
         }
     }
 
-    private ParsedBlocklist parse(final SourceKind kind, final Path body) {
+    private int entryLimitOf(final SourceKind kind) {
+        return kind == SourceKind.TOP_SITES ? settingsService.number(SettingKey.SIGN_IN_FORM_TOP_SITES) : MAX_ENTRIES;
+    }
+
+    private String topSitesUrl(final String apiUrl, final int sites) {
+        final var download = downloadLinkOf(publicHttpFetcher.fetch(apiUrl, MAX_API_ANSWER_BYTES, null, null, REQUEST_TIMEOUT).body());
+        final var listSize = LIST_SIZE.matcher(download);
+        if (!listSize.find()) {
+            throw new BlocklistFormatException(NO_LIST_SIZE);
+        }
+        return listSize.replaceFirst("/" + sites);
+    }
+
+    private static String downloadLinkOf(final Path answer) {
+        try {
+            return JSON.readTree(Files.readString(answer)).path("download").stringValueOpt()
+                    .filter(StringUtils::isNotBlank)
+                    .orElseThrow(() -> new BlocklistFormatException(NO_DOWNLOAD_LINK));
+        } catch (final JacksonException exception) {
+            throw new BlocklistFormatException(NO_DOWNLOAD_LINK);
+        } catch (final IOException exception) {
+            throw new UncheckedIOException(exception);
+        } finally {
+            delete(answer);
+        }
+    }
+
+    private ParsedBlocklist parse(final SourceKind kind, final Path body, final int limit) {
         try (final var reader = new BufferedReader(new InputStreamReader(Files.newInputStream(body), StandardCharsets.UTF_8))) {
-            return kind == SourceKind.LINKS ? linkListParser.parse(reader, MAX_ENTRIES) : blocklistParser.parse(reader, MAX_ENTRIES);
+            return switch (kind) {
+                case DOMAINS -> blocklistParser.parse(reader, limit);
+                case LINKS -> linkListParser.parse(reader, limit);
+                case TOP_SITES -> topSitesParser.parse(reader, limit);
+            };
         } catch (final IOException exception) {
             throw new UncheckedIOException(exception);
         } finally {

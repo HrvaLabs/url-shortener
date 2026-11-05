@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.dto.stats.PublicStatsResponse;
 import cc.hrva.urlshortener.dto.stats.PublicStatsResponse.BlockedLinks;
 import cc.hrva.urlshortener.dto.stats.PublicStatsResponse.Blocklist;
 import cc.hrva.urlshortener.dto.stats.PublicStatsResponse.DailyClicks;
+import cc.hrva.urlshortener.model.enums.BlocklistAction;
 import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
 import cc.hrva.urlshortener.repository.stats.HourlyCount;
 import cc.hrva.urlshortener.repository.stats.HourlyCountRepository;
@@ -62,6 +63,7 @@ public class PublicStats {
 
     private List<Blocklist> blocklists() {
         return blocklistSourceRepository.findByEnabledTrue().stream()
+                .filter(source -> source.getAction() != BlocklistAction.TRUST)
                 .filter(source -> source.getDomainCount() != null && source.getDomainCount() > 0)
                 .map(source -> new Blocklist(source.getName(), source.getAction(), source.getDomainCount()))
                 .sorted(Comparator.comparingLong(Blocklist::entries).reversed().thenComparing(Blocklist::name))

@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.regex.Pattern;
@@ -79,6 +80,10 @@ public final class DomainNames {
 
     public static boolean isPublicSuffix(final String host) {
         return internetDomainName(host).filter(InternetDomainName::isPublicSuffix).isPresent();
+    }
+
+    public static boolean isUnderPrivateSuffix(final String host) {
+        return !Objects.equals(registrableDomain(host), registryDomain(host));
     }
 
     public static boolean isIpLiteral(final String host) {

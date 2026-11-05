@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="052-blocklist-source-tranco">
+        <insert tableName="blocklist_source">
+            <column name="name" value="Tranco top sites"/>
+            <column name="url" value="https://tranco-list.eu/api/lists/date/latest"/>
+            <column name="kind" value="TOP_SITES"/>
+            <column name="action" value="TRUST"/>
+            <column name="enabled" valueBoolean="true"/>
+            <column name="refresh_interval_hours" valueNumeric="24"/>
+        </insert>
+        <rollback>
+            <delete tableName="blocklist_source">
+                <where>name = 'Tranco top sites' AND kind = 'TOP_SITES'</where>
+            </delete>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

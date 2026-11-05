@@ -181,6 +181,29 @@ class DomainNamesTest {
     }
 
     @ParameterizedTest
+    @CsvSource({
+            "foo.github.io, true",
+            "login.foo.github.io, true",
+            "x.pages.dev, true",
+            "scam.ddns.net, true",
+            "accounts.google.com, false",
+            "example.co.uk, false",
+            "github.io, false",
+            "github.com, false",
+            "example.unknowntld, false",
+            "localhost, false",
+            "1.2.3.4, false"
+    })
+    void isUnderPrivateSuffix(final String host, final boolean underPrivateSuffix) {
+        assertThat(DomainNames.isUnderPrivateSuffix(host)).isEqualTo(underPrivateSuffix);
+    }
+
+    @Test
+    void aMissingHostIsNotUnderAPrivateSuffix() {
+        assertThat(DomainNames.isUnderPrivateSuffix(null)).isFalse();
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"1.2.3.4", "127.0.0.1", "::1", "[::1]", "2001:db8::1", "::ffff:1.2.3.4"})
     void addressLiteralIsAnIpLiteral(final String host) {
         assertThat(DomainNames.isIpLiteral(host)).isTrue();

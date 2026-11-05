@@ -21,7 +21,9 @@ import cc.hrva.urlshortener.service.blocklist.BlocklistParser;
 import cc.hrva.urlshortener.service.blocklist.BlocklistRefresher;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
 import cc.hrva.urlshortener.service.blocklist.LinkListParser;
+import cc.hrva.urlshortener.service.blocklist.TopSitesParser;
 import cc.hrva.urlshortener.service.impl.DefaultBlocklistSourceService;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -144,7 +146,8 @@ class DefaultBlocklistSourceServiceTest {
         fetcher = new FakeFetcher(downloads);
         final var memoryGuard = new BlocklistMemoryGuard(blocklistStore, blocklistSourceRepository, new AppProperties());
         final var refresher = new BlocklistRefresher(blocklistSourceRepository, blocklistStore, memoryGuard, fetcher,
-                new BlocklistParser(), new LinkListParser(), alertPublisher, blocklistHealth);
+                new BlocklistParser(), new LinkListParser(), new TopSitesParser(), SettingsServiceFixtures.defaults(new AppProperties()), alertPublisher,
+                blocklistHealth);
         blocklistSourceService = new DefaultBlocklistSourceService(blocklistSourceRepository, blocklistStore, refresher, eventPublisher,
                 blocklistHealth, sendingEmailService);
         lenient().when(blocklistHealth.statusOf(any())).thenAnswer(invocation -> healthy(invocation.getArgument(0)));

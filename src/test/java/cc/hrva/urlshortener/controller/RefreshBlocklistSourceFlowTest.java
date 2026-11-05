@@ -27,6 +27,7 @@ import cc.hrva.urlshortener.security.OAuth2LoginUserService;
 import cc.hrva.urlshortener.security.SessionToken;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.SendingEmailService;
+import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent;
 import cc.hrva.urlshortener.service.blocklist.BlocklistHealth;
@@ -35,6 +36,7 @@ import cc.hrva.urlshortener.service.blocklist.BlocklistParser;
 import cc.hrva.urlshortener.service.blocklist.BlocklistRefresher;
 import cc.hrva.urlshortener.service.blocklist.BlocklistStore;
 import cc.hrva.urlshortener.service.blocklist.LinkListParser;
+import cc.hrva.urlshortener.service.blocklist.TopSitesParser;
 import cc.hrva.urlshortener.service.impl.DefaultAuditLogService;
 import cc.hrva.urlshortener.service.impl.DefaultBlocklistSourceService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
@@ -179,6 +181,9 @@ class RefreshBlocklistSourceFlowTest {
 
     @MockitoBean
     private SendingEmailService sendingEmailService;
+
+    @MockitoBean
+    private SettingsService settingsService;
 
     @DynamicPropertySource
     static void signingKey(final DynamicPropertyRegistry registry) {
@@ -426,6 +431,7 @@ class RefreshBlocklistSourceFlowTest {
             BlocklistMemoryGuard.class,
             BlocklistParser.class,
             LinkListParser.class,
+            TopSitesParser.class,
             AdminAuditAspect.class,
             DefaultAuditLogService.class
     })

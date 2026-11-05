@@ -197,6 +197,16 @@ class PublicStatsTest {
     }
 
     @Test
+    void blocklistsLeaveOutTheListsOfRealSignInDomains() {
+        when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(
+                source(5L, "HaGeZi TIF medium", BlocklistAction.BLOCK, 400_000L),
+                source(10L, "Tranco top sites", BlocklistAction.TRUST, 10_000L)));
+
+        assertThat(publicStatsAt(NOW).collect().blocklists())
+                .containsExactly(new Blocklist("HaGeZi TIF medium", BlocklistAction.BLOCK, 400_000));
+    }
+
+    @Test
     void blocklistsAreReadFromTheDatabaseWithNoRedisReadPerSource() {
         assertThat(PublicStats.class.getDeclaredConstructors()).singleElement()
                 .satisfies(constructor -> assertThat(constructor.getParameterTypes())

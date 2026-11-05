@@ -97,8 +97,8 @@ class DynamicLinkChecksSchemaTest {
                         tuple("Phishing.Database domains", SourceKind.DOMAINS, BlocklistAction.FLAG,
                                 "https://raw.githubusercontent.com/Phishing-Database/Phishing.Database/master/phishing-domains-ACTIVE.txt",
                                 List.of(), 24));
-        assertThat(blocklistSourceRepository.findAll()).hasSize(9);
-        assertThat(blocklistSourceRepository.findByEnabledTrue()).hasSize(8);
+        assertThat(blocklistSourceRepository.findAll()).filteredOn(source -> source.getAction() != BlocklistAction.TRUST).hasSize(9);
+        assertThat(blocklistSourceRepository.findByEnabledTrue()).filteredOn(source -> source.getAction() != BlocklistAction.TRUST).hasSize(8);
     }
 
     @Test

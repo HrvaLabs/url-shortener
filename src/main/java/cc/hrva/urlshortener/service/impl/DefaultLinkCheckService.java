@@ -123,7 +123,9 @@ public class DefaultLinkCheckService implements LinkCheckService {
 
     private List<BlocklistSource> matchingSources(final List<String> domains, final String longUrl) {
         try {
-            final var sources = blocklistSourceRepository.findByEnabledTrue();
+            final var sources = blocklistSourceRepository.findByEnabledTrue().stream()
+                    .filter(source -> source.getAction() != BlocklistAction.TRUST)
+                    .toList();
             final var linkKeys = LinkKeys.of(longUrl);
             final var matches = blocklistStore.matchingSources(sources.stream().collect(Collectors.toMap(
                     BlocklistSource::getId, source -> source.getKind() == SourceKind.LINKS ? linkKeys : domains)));

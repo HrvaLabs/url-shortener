@@ -81,6 +81,7 @@ public class SettingDefaults {
         register(SettingKey.API_KEY_REQUESTS_PER_HOUR, appProperties::getApiKeyRequestsPerHour);
         register(SettingKey.LINK_SCREENSHOTS, moderation::isLinkScreenshots);
         register(SettingKey.VIRUSTOTAL_LOOKUPS, moderation::isVirusTotalLookups);
+        register(SettingKey.SIGN_IN_FORM_TOP_SITES, moderation::getSignInFormTopSites);
         registerAvailability(SettingKey.GOOGLE_SIGN_IN,
                 () -> unavailableUnless(oAuthProviders.configured(OAuthProviders.GOOGLE), GOOGLE_NOT_CONFIGURED));
         registerAvailability(SettingKey.GITHUB_SIGN_IN,

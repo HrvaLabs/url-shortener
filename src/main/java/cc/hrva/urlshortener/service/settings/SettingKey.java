@@ -114,7 +114,10 @@ public enum SettingKey {
                     + "a screenshot once it's 7 days old. Needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_BROWSER_API_TOKEN on the server.", null, true),
     VIRUSTOTAL_LOOKUPS(SettingGroup.SAFETY, "VirusTotal lookups for links in review",
             "Looks up VirusTotal's existing report for each link that enters the review queue. Never sends a link to VirusTotal on its own. "
-                    + "Needs VIRUSTOTAL_API_KEY on the server.", null, true);
+                    + "Needs VIRUSTOTAL_API_KEY on the server.", null, true),
+    SIGN_IN_FORM_TOP_SITES(SettingGroup.SAFETY, "Real sign-in pages: top sites",
+            "How many of the most-visited sites in the Tranco list count as real sign-in pages. The next refresh of the Tranco source "
+                    + "downloads that many.", null, 1000, 100_000, "sites");
 
     private final SettingGroup group;
     private final SettingType type;

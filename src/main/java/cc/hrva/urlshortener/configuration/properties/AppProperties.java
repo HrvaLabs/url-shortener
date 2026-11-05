@@ -469,6 +469,10 @@ public class AppProperties {
         @Max(3650)
         private int warningPageMaxAgeDays = 365;
 
+        @Min(1000)
+        @Max(100_000)
+        private int signInFormTopSites = 10_000;
+
         @Min(1)
         @Max(3650)
         private Integer anonymousExpiryDays;

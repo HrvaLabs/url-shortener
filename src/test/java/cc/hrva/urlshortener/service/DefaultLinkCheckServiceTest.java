@@ -61,6 +61,7 @@ class DefaultLinkCheckServiceTest {
     private static final String PHISHING_ARMY = "Phishing Army";
     private static final String URLHAUS = "URLhaus";
     private static final String SUSPICIOUS_LINKS = "Suspicious links";
+    private static final String TRANCO = "Tranco top sites";
     private static final String YOUNG = "domain registered in the last 30 days";
     private static final String LURE = "login or verification lure";
     private static final String SCAM_URL = "https://njuskalo-placanje.com/prijava";
@@ -346,6 +347,16 @@ class DefaultLinkCheckServiceTest {
 
         assertThat(verdictOf("https://sites.example.com/page"))
                 .isEqualTo(new LinkVerdict(Outcome.FLAG, List.of("Spamhaus DBL: abused legitimate domain"), null, null));
+    }
+
+    @Test
+    void aTrustSourceMatchNeverFlags() {
+        source(1, HAGEZI_FAKE, SourceKind.DOMAINS, BlocklistAction.BLOCK);
+        source(10, TRANCO, SourceKind.TOP_SITES, BlocklistAction.TRUST, "google.com");
+
+        assertThat(verdictOf("https://accounts.google.com/signin")).isEqualTo(CLEAN);
+        verify(blocklistStore, times(2)).matchingSources(keysBySource.capture());
+        assertThat(keysBySource.getAllValues()).allSatisfy(lookups -> assertThat(lookups).containsOnlyKeys(1L));
     }
 
     @Test

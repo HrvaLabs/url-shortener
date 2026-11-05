@@ -280,7 +280,7 @@ class SettingValuesTest {
                 .containsExactly(SettingGroup.SAFETY, SettingType.SWITCH, "Screenshots of links in review",
                         "Cloudflare opens each link that enters the review queue and takes one phone-sized screenshot. The nightly cleanup deletes "
                                 + "a screenshot once it's 7 days old. Needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_BROWSER_API_TOKEN on the server.", null, true);
-        assertThat(SettingKey.values()[SettingKey.values().length - 2]).isEqualTo(SettingKey.LINK_SCREENSHOTS);
+        assertThat(SettingKey.values()[SettingKey.values().length - 3]).isEqualTo(SettingKey.LINK_SCREENSHOTS);
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
         assertThat(defaults.defaultOf(SettingKey.LINK_SCREENSHOTS)).isEqualTo(true);
@@ -301,7 +301,7 @@ class SettingValuesTest {
                 .containsExactly(SettingGroup.SAFETY, SettingType.SWITCH, "VirusTotal lookups for links in review",
                         "Looks up VirusTotal's existing report for each link that enters the review queue. Never sends a link to VirusTotal on its own. "
                                 + "Needs VIRUSTOTAL_API_KEY on the server.", null, true);
-        assertThat(SettingKey.values()[SettingKey.values().length - 1]).isEqualTo(SettingKey.VIRUSTOTAL_LOOKUPS);
+        assertThat(SettingKey.values()[SettingKey.values().length - 2]).isEqualTo(SettingKey.VIRUSTOTAL_LOOKUPS);
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
         assertThat(defaults.defaultOf(SettingKey.VIRUSTOTAL_LOOKUPS)).isEqualTo(true);
@@ -313,6 +313,24 @@ class SettingValuesTest {
         assertThat(defaults.unavailableReason(SettingKey.VIRUSTOTAL_LOOKUPS)).isEmpty();
         appProperties.getModeration().setVirusTotalLookups(false);
         assertThat(defaults.defaultOf(SettingKey.VIRUSTOTAL_LOOKUPS)).isEqualTo(false);
+    }
+
+    @Test
+    void theTopSitesRow() {
+        assertThat(SettingKey.SIGN_IN_FORM_TOP_SITES).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel,
+                        SettingKey::getDescription, SettingKey::getParent, SettingKey::isSafety, SettingKey::getMin, SettingKey::getMax, SettingKey::getUnit,
+                        SettingKey::isNullable)
+                .containsExactly(SettingGroup.SAFETY, SettingType.NUMBER, "Real sign-in pages: top sites",
+                        "How many of the most-visited sites in the Tranco list count as real sign-in pages. The next refresh of the Tranco source "
+                                + "downloads that many.", null, false, 1000, 100_000, "sites", false);
+        assertThat(SettingKey.values()[SettingKey.values().length - 1]).isEqualTo(SettingKey.SIGN_IN_FORM_TOP_SITES);
+        assertThat(SettingValues.format(SettingKey.SIGN_IN_FORM_TOP_SITES, 10_000)).isEqualTo("10,000 sites");
+        assertRefused(SettingKey.SIGN_IN_FORM_TOP_SITES, NODES.numberNode(999), "Use a number from 1,000 to 100,000.");
+        final var appProperties = new AppProperties();
+        final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
+        assertThat(defaults.defaultOf(SettingKey.SIGN_IN_FORM_TOP_SITES)).isEqualTo(10_000);
+        appProperties.getModeration().setSignInFormTopSites(50_000);
+        assertThat(defaults.defaultOf(SettingKey.SIGN_IN_FORM_TOP_SITES)).isEqualTo(50_000);
     }
 
     @Test
@@ -346,7 +364,7 @@ class SettingValuesTest {
                         "Unlimited");
         assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.HUMAN_CHECK.ordinal() + 1, SettingKey.values().length))
                 .containsExactly(SettingKey.ANONYMOUS_EXPIRY_DAYS, SettingKey.ANONYMOUS_VISIT_LIMIT, SettingKey.API_KEY_REQUESTS_PER_HOUR,
-                        SettingKey.LINK_SCREENSHOTS, SettingKey.VIRUSTOTAL_LOOKUPS);
+                        SettingKey.LINK_SCREENSHOTS, SettingKey.VIRUSTOTAL_LOOKUPS, SettingKey.SIGN_IN_FORM_TOP_SITES);
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
         assertThat(defaults.defaultOf(SettingKey.ANONYMOUS_EXPIRY_DAYS)).isNull();
