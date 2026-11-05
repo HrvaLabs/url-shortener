@@ -424,7 +424,13 @@ class DefaultSafeBrowsingRecheckServiceTest {
     void leftoverShortenerLinksAreLogged() {
         final var ids = LongStream.rangeClosed(1000, 1499).boxed().toList();
         when(urlRepository.findIdsOfShortenerLinksDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(ids);
-        when(urlRepository.countShortenerLinksDueForRedirectCheck(any(LocalDateTime.class))).thenReturn(600L);
+        final var checksDone = new java.util.concurrent.atomic.AtomicInteger();
+        when(redirectChainService.check(anyLong())).thenAnswer(invocation -> {
+            checksDone.incrementAndGet();
+            return RedirectChainService.Result.CHECKED;
+        });
+        when(urlRepository.countShortenerLinksDueForRedirectCheck(any(LocalDateTime.class)))
+                .thenAnswer(invocation -> 600L - checksDone.get());
         final var logs = new ListAppender<ILoggingEvent>();
         logs.start();
         final var logger = (Logger) LoggerFactory.getLogger(DefaultSafeBrowsingRecheckService.class);

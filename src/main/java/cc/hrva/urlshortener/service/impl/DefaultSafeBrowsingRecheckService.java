@@ -108,14 +108,14 @@ public class DefaultSafeBrowsingRecheckService implements SafeBrowsingRecheckSer
         }
     }
 
-    private void checkShortenerLinks(final Set<Long> alreadyFollowed) {
+    private void checkShortenerLinks(final Set<Long> attempted) {
         final var checkedBefore = LocalDateTime.now().minusDays(SHORTENER_RECHECK_INTERVAL_DAYS);
         final var ids = urlRepository.findIdsOfShortenerLinksDueForRedirectCheck(checkedBefore, PageRequest.ofSize(SHORTENER_CHECKS_PER_RUN));
-        final var due = ids.stream().filter(id -> !alreadyFollowed.contains(id)).toList();
+        final var leftover = urlRepository.countShortenerLinksDueForRedirectCheck(checkedBefore) - ids.size();
+        final var due = ids.stream().filter(id -> !attempted.contains(id)).toList();
         final var followedIds = new HashSet<Long>();
         follow(due, followedIds);
         log.info("Nightly shortener redirect checks complete — {} of {} due links followed", followedIds.size(), due.size());
-        final var leftover = urlRepository.countShortenerLinksDueForRedirectCheck(checkedBefore) - ids.size();
         if (leftover > 0) {
             log.info("Nightly shortener redirect checks left {} links for the next night", leftover);
         }
