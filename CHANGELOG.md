@@ -4,6 +4,15 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.33.1] — 2026-11-06
+
+The hrva.cc icon no longer shows white corners on dark backgrounds.
+
+### 🐛 Fixes
+- The hrva.cc icon is now a full square. Apps and sites that show it on a dark background, such as link lists and search results, no longer show white corners around it. Some of them keep an old copy of the icon for a while before they pick up the new one.
+
+---
+
 ## [v2.33] — 2026-11-06
 
 Links to other URL shorteners are accepted. hrva.cc follows them to where they end, checks that page and checks them again every night.

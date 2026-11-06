@@ -1,10 +1,24 @@
 {
   "releases": [
     {
-      "version": "v2.33",
+      "version": "v2.33.1",
       "date": "2026-11-06",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "The hrva.cc icon no longer shows white corners on dark backgrounds.",
+      "sections": [
+        {
+          "title": "Fixes",
+          "icon": "bug",
+          "items": [
+            "The hrva.cc icon is now a full square. Apps and sites that show it on a dark background, such as link lists and search results, no longer show white corners around it. Some of them keep an old copy of the icon for a while before they pick up the new one."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.33",
+      "date": "2026-11-06",
       "summary": "Links to other URL shorteners are accepted. hrva.cc follows them to where they end, checks that page and checks them again every night.",
       "sections": [
         {
