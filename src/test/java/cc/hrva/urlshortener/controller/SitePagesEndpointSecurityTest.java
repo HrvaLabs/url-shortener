@@ -70,7 +70,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class SitePagesEndpointSecurityTest {
 
     private static final String FAVICON = "/favicon.ico";
-    private static final String FAVICON_SHA1 = "77a979999941d6c451ac6283fff230132b9cedd5";
+    private static final String FAVICON_SHA1 = "31f371b856085d82504b623ad9a95f4e69cbc74e";
     private static final String HTML = "text/html;charset=UTF-8";
     private static final RSAKey SIGNING_KEY = generateSigningKey();
 
@@ -114,7 +114,7 @@ class SitePagesEndpointSecurityTest {
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "max-age=2592000, public"))
                 .andReturn().getResponse().getContentAsByteArray();
 
-        assertThat(body).hasSize(1559);
+        assertThat(body).hasSize(1540);
         assertThat(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-1").digest(body))).isEqualTo(FAVICON_SHA1);
         assertThat(body).isEqualTo(new ClassPathResource("favicon.ico").getContentAsByteArray());
         verifyNoInteractions(urlService);
