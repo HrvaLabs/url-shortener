@@ -38,7 +38,7 @@ public class UserDto {
     @Schema(description = "Whether the account has a password it can sign in with; only on GET /users/me", example = "true")
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private Boolean passwordSet;
-    @Schema(description = "Whether to ask how the account found hrva.cc: it has not answered and is under 30 days old; only on GET /users/me", example = "true")
+    @Schema(description = "Whether to ask how the account found hrva.cc: every account that has not answered or skipped; only on GET /users/me", example = "true")
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private Boolean askSignupSource;
 
