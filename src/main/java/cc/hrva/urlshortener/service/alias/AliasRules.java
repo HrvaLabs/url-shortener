@@ -1,6 +1,8 @@
 package cc.hrva.urlshortener.service.alias;
 
+import java.util.Arrays;
 import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Pattern;
 import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.exception.ShortUrlAlreadyExistsException;
@@ -29,6 +31,8 @@ public class AliasRules {
 
     private static final Pattern ALIAS = Pattern.compile("[a-zA-Z0-9_-]{1,32}");
     private static final Pattern PART_SEPARATORS = Pattern.compile("[-_]");
+    private static final Set<String> ACCOUNT_FLOW_WORDS = Set.of("password", "passwd", "signin", "signup", "login", "logout", "verify",
+            "verification", "reset", "resetpassword", "otp", "2fa", "passkey");
 
     private final SettingsService settingsService;
     private final ReservedAliasService reservedAliasService;
@@ -50,12 +54,12 @@ public class AliasRules {
             return new AliasDecision(AliasStatus.RESERVED, RESERVED);
         }
         if (domainId == null && !brandExempt) {
-            if (looksLikeOwnPage(alias)) {
-                return new AliasDecision(AliasStatus.RESERVED, LOOKS_LIKE_A_PAGE);
-            }
             final var brand = suspiciousUrlService.findBrandInHandle(alias);
             if (brand.isPresent()) {
                 return new AliasDecision(AliasStatus.RESERVED, BRAND.formatted(brand.get()));
+            }
+            if (looksLikeOwnPage(alias)) {
+                return new AliasDecision(AliasStatus.RESERVED, LOOKS_LIKE_A_PAGE);
             }
         }
         if (urlRepository.aliasTakenIgnoringCase(domainId, alias)) {
@@ -66,7 +70,11 @@ public class AliasRules {
 
     private static boolean looksLikeOwnPage(final String alias) {
         final var lower = alias.toLowerCase(Locale.ROOT);
-        return BioHandles.SYSTEM_WORDS.contains(lower) || BioHandles.SERVICE_NAMES.contains(PART_SEPARATORS.split(lower, 2)[0]);
+        final var parts = PART_SEPARATORS.split(lower);
+        final var joined = String.join("", parts);
+        return BioHandles.SYSTEM_WORDS.contains(lower) || BioHandles.SYSTEM_WORDS.contains(joined)
+                || BioHandles.SERVICE_NAMES.contains(parts[0]) || ACCOUNT_FLOW_WORDS.contains(joined)
+                || Arrays.stream(parts).anyMatch(ACCOUNT_FLOW_WORDS::contains);
     }
 
     public void require(final String alias, final Long domainId, final boolean brandExempt) {

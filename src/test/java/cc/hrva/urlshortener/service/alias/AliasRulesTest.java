@@ -92,7 +92,7 @@ class AliasRulesTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"support", "Admin", "hrva-support", "hrvalabs_news", "HRVA-Login"})
+    @ValueSource(strings = {"support", "Admin", "hrva-support", "hrvalabs_news", "HRVA-Login", "reset-password", "sign-in", "signin", "sign_in", "verify-account", "my-login", "otp-code"})
     void aNameThatLooksLikeAnHrvaCcPageIsReservedOnHrvaCc(final String alias) {
         assertThat(aliasRules.decide(alias, null, false))
                 .isEqualTo(new AliasDecision(AliasStatus.RESERVED, "This name looks like one of hrva.cc's own pages, so it can't be used. Try another."));
@@ -100,7 +100,7 @@ class AliasRulesTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"support", "admin", "hrva-support"})
+    @ValueSource(strings = {"support", "admin", "hrva-support", "reset-password", "sign-in", "my-login"})
     void aNameThatLooksLikeAnHrvaCcPageIsAllowedOnACustomDomainAndForAdmins(final String alias) {
         assertThat(aliasRules.decide(alias, DOMAIN, false).usable()).isTrue();
         assertThat(aliasRules.decide(alias, null, true).usable()).isTrue();
@@ -110,6 +110,10 @@ class AliasRulesTest {
     void aNameThatOnlyContainsAServiceNameIsNotRefused() {
         assertThat(aliasRules.decide("my-hrva", null, false).usable()).isTrue();
         assertThat(aliasRules.decide("supportive", null, false).usable()).isTrue();
+        assertThat(aliasRules.decide("team-photos", null, false).usable()).isTrue();
+        assertThat(aliasRules.decide("help-desk", null, false).usable()).isTrue();
+        assertThat(aliasRules.decide("my-project", null, false).usable()).isTrue();
+        assertThat(aliasRules.decide("karlo-github", null, false).usable()).isTrue();
     }
 
     @Test
