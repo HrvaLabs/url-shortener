@@ -92,7 +92,8 @@ public class AuthorizationServerConfiguration {
                                                                       final AuthorizationServerSettings authorizationServerSettings,
                                                                       final ConnectRequestStore connectRequestStore,
                                                                       final RateLimiter rateLimiter,
-                                                                      final ClientIpResolver clientIpResolver) throws Exception {
+                                                                      final ClientIpResolver clientIpResolver,
+                                                                      final OAuth2AuthorizationService authorizationService) throws Exception {
         final var unsupportedDiscovery = new OrRequestMatcher(
                 path(OPENID_CONFIGURATION),
                 path(PATH_SUFFIXED_AUTHORIZATION_SERVER_METADATA)
@@ -132,7 +133,7 @@ public class AuthorizationServerConfiguration {
                                             .authenticationProvider(new PublicClientRefreshTokenAuthenticationProvider(registeredClientRepository)))
                                     .tokenEndpoint(tokenEndpointConfigurer -> tokenEndpointConfigurer
                                             .authenticationProviders(providers -> providers
-                                                    .replaceAll(provider -> new ResourceIndicatorValidatingProvider(provider, mcpResources))))
+                                                    .replaceAll(provider -> new ResourceIndicatorValidatingProvider(provider, mcpResources, authorizationService))))
                                     .authorizationServerMetadataEndpoint(metadata -> metadata
                                             .authorizationServerMetadataCustomizer(builder -> builder
                                                     .tokenEndpointAuthenticationMethods(AuthorizationServerConfiguration::advertisePublicClients)))
@@ -183,7 +184,7 @@ public class AuthorizationServerConfiguration {
 
     @Bean
     public OAuth2TokenCustomizer<JwtEncodingContext> accessTokenAudienceCustomizer() {
-        return new AccessTokenAudienceCustomizer(appProperties.getMcp().getIssuer() + MCP_RESOURCE_PATH, mcpResources());
+        return new AccessTokenAudienceCustomizer(mcpResources());
     }
 
     @Bean
@@ -231,10 +232,10 @@ public class AuthorizationServerConfiguration {
         return registration;
     }
 
-    private Set<String> mcpResources() {
+    private McpResources mcpResources() {
         final var issuer = appProperties.getMcp().getIssuer();
 
-        return Set.of(issuer + MCP_RESOURCE_PATH, issuer + AdminMcpServerConfiguration.ENDPOINT);
+        return new McpResources(issuer + MCP_RESOURCE_PATH, Set.of(issuer + MCP_RESOURCE_PATH, issuer + AdminMcpServerConfiguration.ENDPOINT));
     }
 
     static RSAKey parseSigningKey(final String signingKey) {

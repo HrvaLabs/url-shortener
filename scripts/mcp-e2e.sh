@@ -64,7 +64,8 @@
 # same token opens admin pages from then on. Section 14b checks the admin MCP endpoint /mcp/admin: its own 401 and protected resource
 # metadata, a client registered for it, admin@localhost (two-step on) listing and running the eight moderation tools there, a refresh
 # without resource keeping the /mcp/admin audience, user@localhost's token refused with 403, /mcp and /mcp/admin tokens refused on each
-# other's endpoint, and the MCP Inspector signing in to /mcp/admin on its own. Section 20 reads the reset token from the link in the email (Mailpit's API port is published on a
+# other's endpoint, a /mcp sign-in's refresh asking for /mcp/admin refused (invalid_target), and the MCP Inspector signing in to /mcp/admin
+# on its own. Section 20 reads the reset token from the link in the email (Mailpit's API port is published on a
 # random loopback port too). Section 30 checks v2.23's accounts work: a password sign-in is a 503 with Retry-After while Redis doesn't answer
 # (CLIENT PAUSE), reset tokens (041, only the SHA-256 stored, an hour, used once, an expired one refused), the account email limits per
 # address and per network (the same 202, then a 429), sign-up answering a taken address like a new one (the note email, nothing created, a new
@@ -873,6 +874,18 @@ mcp_post /mcp "$SIGNED_IN_ACCESS_TOKEN" "$TOOLS_LIST"
 expect_eq "$HTTP_STATUS $(jq -r "$TOOL_NAMES" <<<"$HTTP_BODY")" "200 link_stats,list_links,shorten_url" "the admin's /mcp lists only the three link tools"
 mcp_post /mcp "$ADMIN_MCP_TOKEN" "$TOOLS_LIST"
 expect_eq "$HTTP_STATUS" 401 "and a /mcp/admin token doesn't open /mcp"
+http -X POST "$BASE/oauth2/token" \
+    --data-urlencode grant_type=refresh_token \
+    --data-urlencode "refresh_token=$SIGNED_IN_REFRESH_TOKEN" \
+    --data-urlencode "client_id=$ADMIN_CLIENT_ID" \
+    --data-urlencode "resource=$ADMIN_RESOURCE"
+expect_eq "$HTTP_STATUS $(jq -r .error <<<"$HTTP_BODY")" "400 invalid_target" "the /mcp sign-in can't be refreshed into a /mcp/admin token, even the admin's"
+http -X POST "$BASE/oauth2/token" \
+    --data-urlencode grant_type=refresh_token \
+    --data-urlencode "refresh_token=$SIGNED_IN_REFRESH_TOKEN" \
+    --data-urlencode "client_id=$ADMIN_CLIENT_ID" \
+    --data-urlencode "resource=$RESOURCE"
+expect_eq "$HTTP_STATUS $(audience_of "$(jq -r .access_token <<<"$HTTP_BODY")")" "200 $RESOURCE" "and its refresh token still works for /mcp"
 
 echo "  --- the MCP Inspector signs in to /mcp/admin on its own, approved by admin@localhost"
 MCP_E2E_APP_JWT=$ADMIN_JWT PATH="$SCRIPT_DIR/mcp-e2e/fake-browser:$PATH" MCP_AUTO_OPEN_ENABLED=true \

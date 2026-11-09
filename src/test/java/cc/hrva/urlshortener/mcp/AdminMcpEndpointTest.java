@@ -86,7 +86,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
                 "app.jwt-base64-secret=dGVzdC1vbmx5LXNlY3JldA==",
                 "app.email-sender-address=no-reply@localhost",
                 "app.contact-email=info@localhost",
-                "app.server-url=localhost"
+                "app.server-url=localhost",
+                "spring.ai.mcp.server.capabilities.completion=true",
+                "spring.ai.mcp.server.instructions=Test instructions for both servers."
         })
 @AutoConfigureMockMvc
 @ExtendWith(OutputCaptureExtension.class)
@@ -228,6 +230,7 @@ class AdminMcpEndpointTest {
     void adminEndpointSpeaksTheSameJsonRpcAsMcp() throws Exception {
         signedIn(admin(true));
         final var token = accessTokens.issue(ADMIN_EMAIL, ADMIN_RESOURCE);
+        final var mcpToken = accessTokens.issue(ADMIN_EMAIL, MCP_RESOURCE);
 
         final var body = mockMvc.perform(mcpRequest("/mcp/admin", INITIALIZE).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())
@@ -235,8 +238,17 @@ class AdminMcpEndpointTest {
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
+        final var mcpBody = mockMvc.perform(mcpRequest("/mcp", INITIALIZE).header(HttpHeaders.AUTHORIZATION, "Bearer " + mcpToken))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
         final Map<String, Object> capabilities = JsonPath.read(body, "$.result.capabilities");
-        assertThat(capabilities).containsOnlyKeys("tools", "resources", "prompts");
+        final Map<String, Object> mcpCapabilities = JsonPath.read(mcpBody, "$.result.capabilities");
+        assertThat(capabilities).containsOnlyKeys("tools", "resources", "prompts", "completions").isEqualTo(mcpCapabilities);
+        assertThat((String) JsonPath.read(body, "$.result.instructions"))
+                .isEqualTo("Test instructions for both servers.")
+                .isEqualTo(JsonPath.read(mcpBody, "$.result.instructions"));
 
         mockMvc.perform(mcpRequest("/mcp/admin", RESOURCES_LIST).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())

@@ -216,7 +216,7 @@ class PublicClientRefreshTest {
     }
 
     @Test
-    void theAdminResourceGetsTheAdminAudience() throws Exception {
+    void anAdminSignInStillRefreshesToTheAdminResource() throws Exception {
         final var clientId = accessTokens.register(PUBLIC_REGISTRATION);
         final var code = accessTokens.authorize(clientId, EMAIL, ADMIN_RESOURCE);
         final var body = mockMvc.perform(codeExchangeRequestWithoutResource(clientId, code).param("resource", ADMIN_RESOURCE))
@@ -230,6 +230,63 @@ class PublicClientRefreshTest {
         final var refreshed = refresh(clientId, JsonPath.read(body, "$.refresh_token"), ADMIN_RESOURCE);
 
         assertThat(mcpJwtDecoder.decode((String) refreshed.get("access_token")).getAudience()).containsExactly(ADMIN_RESOURCE);
+    }
+
+    @Test
+    void aSignInForMcpCannotBeExchangedForAnAdminToken() throws Exception {
+        final var clientId = accessTokens.register(PUBLIC_REGISTRATION);
+        final var code = accessTokens.authorize(clientId, EMAIL, RESOURCE);
+
+        mockMvc.perform(codeExchangeRequestWithoutResource(clientId, code).param("resource", ADMIN_RESOURCE))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_target"))
+                .andExpect(jsonPath("$.access_token").doesNotExist());
+
+        final var body = mockMvc.perform(codeExchangeRequest(clientId, code))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(mcpJwtDecoder.decode(JsonPath.read(body, "$.access_token")).getAudience()).containsExactly(RESOURCE);
+    }
+
+    @Test
+    void aSignInForMcpCannotBeRefreshedIntoAnAdminToken() throws Exception {
+        final var clientId = accessTokens.register(PUBLIC_REGISTRATION);
+        final var refreshToken = (String) exchangeCode(clientId).get("refresh_token");
+
+        mockMvc.perform(refreshRequest(clientId, refreshToken, ADMIN_RESOURCE))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_target"))
+                .andExpect(jsonPath("$.access_token").doesNotExist());
+
+        final var refreshed = refresh(clientId, refreshToken, RESOURCE);
+
+        assertThat(mcpJwtDecoder.decode((String) refreshed.get("access_token")).getAudience()).containsExactly(RESOURCE);
+    }
+
+    @Test
+    void aSignInWithoutResourceCannotRefreshIntoAnAdminToken() throws Exception {
+        final var clientId = accessTokens.register(PUBLIC_REGISTRATION);
+        final var code = accessTokens.authorize(clientId, EMAIL, null);
+        final var body = mockMvc.perform(codeExchangeRequestWithoutResource(clientId, code))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        final String refreshToken = JsonPath.read(body, "$.refresh_token");
+
+        mockMvc.perform(refreshRequest(clientId, refreshToken, ADMIN_RESOURCE))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_target"))
+                .andExpect(jsonPath("$.access_token").doesNotExist());
+
+        final var refreshed = refresh(clientId, refreshToken, RESOURCE);
+
+        assertThat(mcpJwtDecoder.decode((String) refreshed.get("access_token")).getAudience()).containsExactly(RESOURCE);
+        mockMvc.perform(mcpRequest().header(HttpHeaders.AUTHORIZATION, "Bearer " + refreshed.get("access_token")))
+                .andExpect(status().isOk());
     }
 
     @Test

@@ -59,6 +59,7 @@ public class AdminMcpServerConfiguration {
                 .serverInfo(serverProperties.getName(), serverProperties.getVersion())
                 .capabilities(capabilities())
                 .tools(SyncMcpAnnotationProviders.statelessToolSpecifications(List.of(moderationTools())))
+                .instructions(serverProperties.getInstructions())
                 .requestTimeout(serverProperties.getRequestTimeout())
                 .immediateExecution(true)
                 .build();
@@ -78,6 +79,9 @@ public class AdminMcpServerConfiguration {
         }
         if (serverProperties.getCapabilities().isPrompt()) {
             capabilities.prompts(false);
+        }
+        if (serverProperties.getCapabilities().isCompletion()) {
+            capabilities.completions();
         }
 
         return capabilities.build();
