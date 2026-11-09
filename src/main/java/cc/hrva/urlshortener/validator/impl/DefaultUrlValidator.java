@@ -6,7 +6,6 @@ import cc.hrva.urlshortener.exception.*;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.LinkCheckService;
-import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
 import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
@@ -35,7 +34,6 @@ public class DefaultUrlValidator implements UrlValidator {
     private final SafeBrowsingService safeBrowsingService;
     private final SuspiciousUrlService suspiciousUrlService;
     private final LinkCheckService linkCheckService;
-    private final ReservedAliasService reservedAliasService;
     private final SettingsService settingsService;
 
     private static final String BLOCKLISTED = "This destination is on a blocklist and can't be shortened. If you think that's a mistake, write to support@hrva.cc.";

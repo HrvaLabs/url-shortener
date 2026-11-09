@@ -16,7 +16,6 @@ import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.LinkCheckService;
-import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UserService;
@@ -71,13 +70,9 @@ class DefaultUrlValidatorTest {
     @Mock
     private LinkCheckService linkCheckService;
 
-    @Mock
-    private ReservedAliasService reservedAliasService;
-
     @BeforeEach
     void setUp() {
-        this.urlValidator = new DefaultUrlValidator(userService, urlRepository, safeBrowsingService, suspiciousUrlService, linkCheckService,
-                reservedAliasService, settingsService);
+        this.urlValidator = new DefaultUrlValidator(userService, urlRepository, safeBrowsingService, suspiciousUrlService, linkCheckService, settingsService);
     }
 
     @Test
@@ -682,6 +677,6 @@ class DefaultUrlValidatorTest {
         final var hostLists = mock(HostLists.class);
         lenient().when(hostLists.lookup(anyString())).thenReturn(new HostListing(true, false, BrandSite.NOT_LISTED));
         return new DefaultUrlValidator(userService, urlRepository, safeBrowsingService, new DefaultSuspiciousUrlService(appProperties, hostLists),
-                linkCheckService, reservedAliasService, settingsService);
+                linkCheckService, settingsService);
     }
 }

@@ -5832,7 +5832,7 @@ class UrlServiceTest {
         final var service = new DefaultUrlService(
                 userService,
                 new DefaultUrlValidator(userService, urlRepository, safeBrowsingService, new DefaultSuspiciousUrlService(appProperties, hostLists),
-                        linkCheckService, reservedAliasService, settingsService),
+                        linkCheckService, settingsService),
                 apiKeyService,
                 urlRepository,
                 appProperties,
@@ -5871,7 +5871,7 @@ class UrlServiceTest {
         return new DefaultUrlService(
                 userService,
                 new DefaultUrlValidator(userService, urlRepository, safeBrowsingService, new DefaultSuspiciousUrlService(appProperties, hostLists),
-                        linkCheckService, reservedAliasService, settingsService),
+                        linkCheckService, settingsService),
                 apiKeyService,
                 urlRepository,
                 appProperties,
