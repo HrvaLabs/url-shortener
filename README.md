@@ -1,5 +1,7 @@
 # [URL-Shortener](https://app.hrva.cc)
 
+[![hrva.cc MCP connector – tool definition quality and endpoint health on Glama](https://glama.ai/mcp/connectors/cc.hrva/url-shortener/badges/score.svg)](https://glama.ai/mcp/connectors/cc.hrva/url-shortener)
+
 ## Overview
 hrva.cc is a privacy-first URL shortener with built-in link safety. This repository is the backend: a Spring Boot API that creates and redirects short links, checks them for phishing and malware, and counts clicks without tracking anyone. The frontend lives in [HrvaLabs/URL-Shortener-FE](https://github.com/HrvaLabs/URL-Shortener-FE).
 
@@ -46,7 +48,7 @@ The changelog is shown at [app.hrva.cc/changelog](https://app.hrva.cc/changelog)
 - You can export your data and delete your account.
 
 ### AI connector
-- AI apps such as Claude use hrva.cc over MCP at `https://hrva.cc/mcp`, signing in with OAuth 2.1.
+- AI apps such as Claude use hrva.cc over MCP at `https://hrva.cc/mcp`, signing in with OAuth 2.1. The admin moderation tools are a second connector at `https://hrva.cc/mcp/admin`.
 
 ### Admin
 - Pages for stats, the review queue, moderation, blocklists, domain rules, reserved aliases, bio pages, custom domains and the audit log.
@@ -92,7 +94,7 @@ Build, test and run commands, local dev users and the end-to-end check (`scripts
   - **O6:** custom hostnames run through the hrva.cc zone's Cloudflare rules. Check that no cache, configuration, redirect or WAF skip rule they also need matches only `http.host eq "hrva.cc"`, and that redirects are never cached.
 - **Cloudflare-only origin.** The per-network rate limits trust `CF-Connecting-IP`, and the country counts trust `CF-IPCountry`. The origin must therefore accept traffic only from Cloudflare, through a Cloudflare Tunnel or a firewall limited to [Cloudflare's IP ranges](https://www.cloudflare.com/ips/). Otherwise anyone can forge those headers.
 - **Cloudflare rules for the MCP paths and one-click unsubscribe.** MCP clients aren't browsers, and neither are the mail providers that POST a one-click unsubscribe (RFC 8058) from the email's `List-Unsubscribe` header. A challenge breaks both:
-  - Exempt `/mcp`, `/oauth2/*`, `/.well-known/*` and `/api/v1/notifications/unsubscribe` from WAF managed challenges and Super Bot Fight Mode. If Bot Fight Mode on the Free plan challenges them, turn it off.
+  - Exempt `/mcp` and `/mcp/admin`, `/oauth2/*`, `/.well-known/*` and `/api/v1/notifications/unsubscribe` from WAF managed challenges and Super Bot Fight Mode. If Bot Fight Mode on the Free plan challenges them, turn it off.
   - Don't cache `GET /oauth2/authorize` or `/.well-known/*` at the edge.
 - **Smoke test after a deploy.** Expect issuer `https://hrva.cc`, resource `https://hrva.cc/mcp`, and 401 from `/mcp` without a token:
   ```bash

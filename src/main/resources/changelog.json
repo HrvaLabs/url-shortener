@@ -1,10 +1,58 @@
 {
   "releases": [
     {
-      "version": "v2.33.1",
-      "date": "2026-11-06",
+      "version": "v2.34",
+      "date": "2026-11-09",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "A page for short links on your own domain, a check for whether a custom name is free, and refusals that name the support address.",
+      "sections": [
+        {
+          "title": "Site",
+          "icon": "globe",
+          "items": [
+            "A new page, /custom-domain-url-shortener, explains short links on your own domain: you apply in Settings, an admin approves, you add one CNAME record, and the links are yours to name.",
+            "A new page, /custom-short-links, checks whether a custom name is free. Type a name, or paste a short link like hrva.cc/karlo, and it says whether the name is free, taken, reserved or not allowed. Signed in, you go on to the dashboard with the name already filled in. Otherwise you go on to create an account. The check needs no account and is limited to 120 checks an hour.",
+            "A new custom name now counts as taken whatever its capital letters. If karlo-github exists, Karlo-GitHub is refused. Links made earlier keep their names as they are.",
+            "New custom names on hrva.cc can't contain a brand's name, such as paypal or booking, and the refusal says which one: \"This name contains the brand name paypal, so it can't be used on hrva.cc. Try another.\" This applies to hrva.cc only. Short links on your own domain are not checked for brand names. If a domain you own is removed and its links move to hrva.cc, a link with a brand name in its alias gets a random one.",
+            "Names that bots look for on every site, such as wp-admin, are reserved on hrva.cc.",
+            "Every account is asked once how it found hrva.cc, in a card on the dashboard. You can answer or skip, and the card does not come back after either.",
+            "Refusals of a destination now say \"If you think that's a mistake, write to support@hrva.cc.\" The address is also on the About page.",
+            "Two comparisons are published: /compare/bitly-alternative, re-checked on 2026-11-09 against Bitly's own pages, and /compare/free-custom-domain-shorteners. Their tables use ✓ and ✗ and give the source and the date for each cell.",
+            "The Help page has a new section on choosing your own alias.",
+            "robots.txt now allows AI crawlers on the public pages, except Bytespider."
+          ]
+        },
+        {
+          "title": "Privacy",
+          "icon": "lock",
+          "items": [
+            "hrva.cc now counts visits to its public pages by source and by page. The count is kept in Cloudflare Workers Analytics Engine. No IP address is kept, nothing is stored in your browser, and a counted page never includes the part of its address after a question mark. Pages you reach through a link in an email, sign-in pages and the dashboard are not counted, and neither are visits that come from hrva.cc itself. The privacy page describes both counts in new sections.",
+            "The answer to \"how did you find hrva.cc\" is kept on the account. It is optional, and you can ask for it to be removed by writing to privacy@hrvalabs.net or by deleting the account. It is part of your data export."
+          ]
+        },
+        {
+          "title": "AI Connector",
+          "icon": "sparkles",
+          "items": [
+            "The AI connector at https://hrva.cc/mcp now lists three tools to everyone: link_stats, list_links and shorten_url. The moderation tools are no longer listed there."
+          ]
+        },
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "The Users tab of the stats page has two new tables, visit sources and landing pages, for 7, 30 or 90 days. Each shows the top 20 rows. They are read from Cloudflare and kept for an hour, and Cloudflare keeps the counts for 3 months, so a 365-day request is answered for 90 days. The tables need the new setting CLOUDFLARE_ANALYTICS_API_TOKEN (a token with Account Analytics Read); without it the page says visit counts are not connected, and when Cloudflare can't be reached it says so instead of showing zeros.",
+            "The Users tab also shows the sign-up answers: how many accounts answered each way or skipped. These counts cover all accounts, not just the days picked.",
+            "The moderation tools for Claude and ChatGPT moved to https://hrva.cc/mcp/admin. Only admins with two-step sign-in can connect there, and it has its own connector, so add it as a second connector. A sign-in made for /mcp can't be used for /mcp/admin.",
+            "Site settings has a new group, App directories, with the OpenAI challenge. Its text is served at /.well-known/openai-apps-challenge as plain text, and the address answers 404 while the setting is empty."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.33.1",
+      "date": "2026-11-06",
       "summary": "The hrva.cc icon no longer shows white corners on dark backgrounds.",
       "sections": [
         {
