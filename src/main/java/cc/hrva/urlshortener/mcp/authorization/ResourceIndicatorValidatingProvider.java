@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.mcp.authorization;
 
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.core.Authentication;
@@ -18,13 +19,13 @@ public class ResourceIndicatorValidatingProvider implements AuthenticationProvid
     );
 
     private final AuthenticationProvider delegate;
-    private final String resource;
+    private final Set<String> resources;
 
     @Override
     public Authentication authenticate(final Authentication authentication) {
         if (authentication instanceof OAuth2AuthorizationGrantAuthenticationToken grant) {
             final var requestedResource = grant.getAdditionalParameters().get(RESOURCE_PARAMETER);
-            if (requestedResource != null && !resource.equals(requestedResource)) {
+            if (requestedResource != null && !resources.contains(requestedResource)) {
                 throw new OAuth2AuthenticationException(INVALID_TARGET);
             }
         }

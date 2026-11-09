@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.controller.ReportController;
 import cc.hrva.urlshortener.mcp.McpModernProbeFilter;
 import cc.hrva.urlshortener.mcp.McpRequestBodyLimitFilter;
+import cc.hrva.urlshortener.mcp.admin.AdminMcpServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.BridgedAuthorizationRequestFilter;
 import cc.hrva.urlshortener.mcp.bridge.ConnectContinueController;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRedirectEntryPoint;
@@ -19,6 +20,7 @@ import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
 import java.text.ParseException;
 import java.util.List;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springaicommunity.mcp.security.authorizationserver.config.LocalhostWildcardPortValidator;
 import org.springaicommunity.mcp.security.authorizationserver.config.McpAuthorizationServerConfigurer;
@@ -101,7 +103,7 @@ public class AuthorizationServerConfiguration {
                 post(authorizationServerSettings.getTokenIntrospectionEndpoint()),
                 post(authorizationServerSettings.getTokenRevocationEndpoint())
         );
-        final var mcpResource = appProperties.getMcp().getIssuer() + MCP_RESOURCE_PATH;
+        final var mcpResources = mcpResources();
         final var connectContinue = path(ConnectContinueController.CONTINUE_PATH);
         final var connectRedirectEntryPoint = new ConnectRedirectEntryPoint(connectRequestStore, registeredClientRepository, appProperties.getFrontendUrl());
         final var authorizationResponseHandler = new SessionEndingAuthorizationResponseHandler();
@@ -130,7 +132,7 @@ public class AuthorizationServerConfiguration {
                                             .authenticationProvider(new PublicClientRefreshTokenAuthenticationProvider(registeredClientRepository)))
                                     .tokenEndpoint(tokenEndpointConfigurer -> tokenEndpointConfigurer
                                             .authenticationProviders(providers -> providers
-                                                    .replaceAll(provider -> new ResourceIndicatorValidatingProvider(provider, mcpResource))))
+                                                    .replaceAll(provider -> new ResourceIndicatorValidatingProvider(provider, mcpResources))))
                                     .authorizationServerMetadataEndpoint(metadata -> metadata
                                             .authorizationServerMetadataCustomizer(builder -> builder
                                                     .tokenEndpointAuthenticationMethods(AuthorizationServerConfiguration::advertisePublicClients)))
@@ -181,7 +183,7 @@ public class AuthorizationServerConfiguration {
 
     @Bean
     public OAuth2TokenCustomizer<JwtEncodingContext> accessTokenAudienceCustomizer() {
-        return new AccessTokenAudienceCustomizer(appProperties.getMcp().getIssuer() + MCP_RESOURCE_PATH);
+        return new AccessTokenAudienceCustomizer(appProperties.getMcp().getIssuer() + MCP_RESOURCE_PATH, mcpResources());
     }
 
     @Bean
@@ -205,7 +207,7 @@ public class AuthorizationServerConfiguration {
     @Bean
     public FilterRegistrationBean<McpRequestBodyLimitFilter> mcpRequestBodyLimitFilterRegistration() {
         final var registration = new FilterRegistrationBean<>(new McpRequestBodyLimitFilter());
-        registration.addUrlPatterns(CLIENT_REGISTRATION_ENDPOINT, MCP_RESOURCE_PATH, ReportController.REPORTS_ENDPOINT);
+        registration.addUrlPatterns(CLIENT_REGISTRATION_ENDPOINT, MCP_RESOURCE_PATH, AdminMcpServerConfiguration.ENDPOINT, ReportController.REPORTS_ENDPOINT);
         registration.setOrder(REQUEST_BODY_LIMIT_FILTER_ORDER);
 
         return registration;
@@ -214,7 +216,7 @@ public class AuthorizationServerConfiguration {
     @Bean
     public FilterRegistrationBean<McpModernProbeFilter> mcpModernProbeFilterRegistration() {
         final var registration = new FilterRegistrationBean<>(new McpModernProbeFilter());
-        registration.addUrlPatterns(MCP_RESOURCE_PATH);
+        registration.addUrlPatterns(MCP_RESOURCE_PATH, AdminMcpServerConfiguration.ENDPOINT);
         registration.setOrder(MODERN_PROBE_FILTER_ORDER);
 
         return registration;
@@ -227,6 +229,12 @@ public class AuthorizationServerConfiguration {
         registration.setOrder(DCR_EMPTY_SCOPE_FILTER_ORDER);
 
         return registration;
+    }
+
+    private Set<String> mcpResources() {
+        final var issuer = appProperties.getMcp().getIssuer();
+
+        return Set.of(issuer + MCP_RESOURCE_PATH, issuer + AdminMcpServerConfiguration.ENDPOINT);
     }
 
     static RSAKey parseSigningKey(final String signingKey) {

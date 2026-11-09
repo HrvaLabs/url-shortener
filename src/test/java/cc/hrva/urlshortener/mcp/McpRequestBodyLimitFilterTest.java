@@ -120,8 +120,8 @@ class McpRequestBodyLimitFilterTest {
         final var bodyLimit = configuration.mcpRequestBodyLimitFilterRegistration();
         final var registration = configuration.dcrEmptyScopeFilterRegistration(JsonMapper.builder().build());
 
-        assertThat(bodyLimit.getUrlPatterns()).containsExactlyInAnyOrder("/oauth2/register", "/mcp", "/api/v1/reports");
-        assertThat(configuration.mcpModernProbeFilterRegistration().getUrlPatterns()).containsExactly("/mcp");
+        assertThat(bodyLimit.getUrlPatterns()).containsExactlyInAnyOrder("/oauth2/register", "/mcp", "/mcp/admin", "/api/v1/reports");
+        assertThat(configuration.mcpModernProbeFilterRegistration().getUrlPatterns()).containsExactlyInAnyOrder("/mcp", "/mcp/admin");
         assertThat(bodyLimit.getOrder()).isLessThan(registration.getOrder());
         assertThat(registration.getOrder()).isLessThan(SecurityFilterProperties.DEFAULT_FILTER_ORDER);
     }

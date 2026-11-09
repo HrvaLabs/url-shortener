@@ -841,7 +841,7 @@ class UpdateLinkFlowTest {
 
         mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"longUrl\":\"https://njuskaio.cam/a/MAUB3\"}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.detail").value("This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us."));
+                .andExpect(jsonPath("$.detail").value("This destination is on a blocklist and can't be shortened. If you think that's a mistake, write to support@hrva.cc."));
 
         assertThat(jdbcTemplate.queryForObject("select long_url from url where id = ?", String.class, LINK)).isEqualTo(OLD_DESTINATION);
         assertThat(jdbcTemplate.queryForObject("select count(*) from link_destination_change", Long.class)).isZero();
@@ -943,7 +943,7 @@ class UpdateLinkFlowTest {
 
         mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"active\":true}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.detail").value("This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us."));
+                .andExpect(jsonPath("$.detail").value("This destination is on a blocklist and can't be shortened. If you think that's a mistake, write to support@hrva.cc."));
 
         assertThat(jdbcTemplate.queryForObject("select active from url where id = ?", Boolean.class, LINK)).isFalse();
     }
@@ -965,7 +965,7 @@ class UpdateLinkFlowTest {
 
         mockMvc.perform(edit("owner-token", "{\"id\":" + LINK + ",\"active\":true}"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.detail").value("This link was blocked as unsafe. Contact support if you think that's a mistake."));
+                .andExpect(jsonPath("$.detail").value("This link was blocked as unsafe. If you think that's a mistake, write to support@hrva.cc."));
         mockMvc.perform(edit("admin-token", "{\"id\":" + LINK + ",\"active\":true}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.detail").value("This link is blocked, so saving can't turn it back on."));

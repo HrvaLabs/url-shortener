@@ -38,7 +38,7 @@ public class DefaultUrlValidator implements UrlValidator {
     private final ReservedAliasService reservedAliasService;
     private final SettingsService settingsService;
 
-    private static final String BLOCKLISTED = "This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us.";
+    private static final String BLOCKLISTED = "This destination is on a blocklist and can't be shortened. If you think that's a mistake, write to support@hrva.cc.";
     private static final String STILL_BLOCKED = "This destination is still blocked: ";
     private static final String REASON_SEPARATOR = ", ";
     private static final String SAFE_BROWSING_REASON = "Google Safe Browsing: ";
@@ -128,7 +128,7 @@ public class DefaultUrlValidator implements UrlValidator {
             throw new UrlValidationException("This link is being checked. It comes back on its own if it looks fine.");
         }
         if (url.getThreatType() != null || url.getBlockReason() != null) {
-            throw new UrlValidationException("This link was blocked as unsafe. Contact support if you think that's a mistake.");
+            throw new UrlValidationException("This link was blocked as unsafe. If you think that's a mistake, write to support@hrva.cc.");
         }
     }
 

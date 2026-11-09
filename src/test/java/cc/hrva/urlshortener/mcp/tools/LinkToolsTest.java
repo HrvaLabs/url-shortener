@@ -36,6 +36,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -199,6 +200,19 @@ class LinkToolsTest {
         assertThat(request.getAllValues().get(0).getTags()).containsExactly("ai", "work");
         assertThat(request.getAllValues().get(1).getTags()).containsExactly("ai", "work");
         assertThat(request.getAllValues().get(2).getTags()).containsExactly("ai");
+    }
+
+    @Test
+    void shortenUrlIsOpenWorld() throws NoSuchMethodException {
+        final var tool = LinkTools.class.getMethod("shortenUrl", String.class, String.class, Long.class, String.class, List.class)
+                .getAnnotation(McpTool.class);
+
+        assertThat(tool.annotations().openWorldHint()).isTrue();
+        assertThat(tool.annotations().readOnlyHint()).isFalse();
+        assertThat(tool.annotations().destructiveHint()).isFalse();
+        assertThat(tool.description())
+                .contains("\"This destination is on a blocklist and can't be shortened. If you think that's a mistake, write to support@hrva.cc.\"")
+                .doesNotContain("contact us");
     }
 
     @Test

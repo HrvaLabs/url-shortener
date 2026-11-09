@@ -1,7 +1,10 @@
 package cc.hrva.urlshortener.mcp;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.mcp.admin.AdminMcpAuthorizationManager;
+import cc.hrva.urlshortener.mcp.admin.AdminMcpServerConfiguration;
 import cc.hrva.urlshortener.mcp.authorization.StillAuthorizedValidator;
+import cc.hrva.urlshortener.repository.UserRepository;
 import java.util.Collection;
 import lombok.RequiredArgsConstructor;
 import org.springaicommunity.mcp.security.server.config.McpServerOAuth2Configurer;
@@ -35,42 +38,35 @@ public class McpResourceServerConfiguration {
     private static final String MCP_ENDPOINT = "/mcp";
     private static final String PROTECTED_RESOURCE_METADATA = "/.well-known/oauth-protected-resource";
     private static final String RESOURCE_NAME = "hrva.cc";
+    private static final String ADMIN_RESOURCE_NAME = "hrva.cc admin";
 
     private final AppProperties appProperties;
 
     @Bean
     @Order(2)
-    public SecurityFilterChain mcpResourceServerSecurityFilterChain(final HttpSecurity http,
-                                                                    final JwtDecoder mcpJwtDecoder,
-                                                                    final OAuth2AuthorizationService authorizationService) throws Exception {
-        final var issuer = appProperties.getMcp().getIssuer();
-        final var resource = issuer + MCP_ENDPOINT;
-        final var accessTokenValidator = new DelegatingOAuth2TokenValidator<>(
-                new JwtClaimValidator<Collection<String>>(JwtClaimNames.AUD, audience -> audience != null && audience.contains(resource)),
-                new StillAuthorizedValidator(authorizationService)
-        );
+    public SecurityFilterChain adminMcpResourceServerSecurityFilterChain(final HttpSecurity http,
+                                                                         final JwtDecoder mcpJwtDecoder,
+                                                                         final OAuth2AuthorizationService authorizationService,
+                                                                         final UserRepository userRepository) throws Exception {
+        http.securityMatcher(AdminMcpServerConfiguration.ENDPOINT, PROTECTED_RESOURCE_METADATA + AdminMcpServerConfiguration.ENDPOINT)
+                .authorizeHttpRequests(authorize -> authorize.anyRequest().access(new AdminMcpAuthorizationManager(userRepository)));
 
-        http.securityMatcher(MCP_ENDPOINT, PROTECTED_RESOURCE_METADATA + "/**")
-                .authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
-                .with(McpServerOAuth2Configurer.mcpServerOAuth2(), mcp -> mcp
-                        .authorizationServer(issuer)
-                        .jwtDecoder(validating(mcpJwtDecoder, accessTokenValidator))
-                        .protectedResourceMetadataCustomizer(metadata -> metadata
-                                .resource(resource)
-                                .authorizationServer(issuer)
-                                .resourceName(RESOURCE_NAME)
-                                .tlsClientCertificateBoundAccessTokens(false))
-                        .oauth2ResourceServer(resourceServer -> resourceServer
-                                .authenticationEntryPoint(resourceMetadataEntryPoint(issuer + PROTECTED_RESOURCE_METADATA + MCP_ENDPOINT))))
-                .sessionManagement(sessionManagement -> sessionManagement.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .csrf(AbstractHttpConfigurer::disable)
-                .cors(Customizer.withDefaults());
-
-        return http.build();
+        return protectedResource(http, AdminMcpServerConfiguration.ENDPOINT, ADMIN_RESOURCE_NAME, mcpJwtDecoder, authorizationService).build();
     }
 
     @Bean
     @Order(3)
+    public SecurityFilterChain mcpResourceServerSecurityFilterChain(final HttpSecurity http,
+                                                                    final JwtDecoder mcpJwtDecoder,
+                                                                    final OAuth2AuthorizationService authorizationService) throws Exception {
+        http.securityMatcher(MCP_ENDPOINT, PROTECTED_RESOURCE_METADATA + "/**")
+                .authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated());
+
+        return protectedResource(http, MCP_ENDPOINT, RESOURCE_NAME, mcpJwtDecoder, authorizationService).build();
+    }
+
+    @Bean
+    @Order(4)
     public SecurityFilterChain removedAnonymousMcpSecurityFilterChain(final HttpSecurity http) throws Exception {
         http.securityMatcher(REMOVED_ANONYMOUS_MCP_PATHS)
                 .authorizeHttpRequests(authorize -> authorize.anyRequest().denyAll())
@@ -80,6 +76,33 @@ public class McpResourceServerConfiguration {
                 .csrf(AbstractHttpConfigurer::disable);
 
         return http.build();
+    }
+
+    private HttpSecurity protectedResource(final HttpSecurity http,
+                                           final String endpoint,
+                                           final String resourceName,
+                                           final JwtDecoder mcpJwtDecoder,
+                                           final OAuth2AuthorizationService authorizationService) throws Exception {
+        final var issuer = appProperties.getMcp().getIssuer();
+        final var resource = issuer + endpoint;
+        final var accessTokenValidator = new DelegatingOAuth2TokenValidator<>(
+                new JwtClaimValidator<Collection<String>>(JwtClaimNames.AUD, audience -> audience != null && audience.contains(resource)),
+                new StillAuthorizedValidator(authorizationService)
+        );
+
+        return http.with(McpServerOAuth2Configurer.mcpServerOAuth2(), mcp -> mcp
+                        .authorizationServer(issuer)
+                        .jwtDecoder(validating(mcpJwtDecoder, accessTokenValidator))
+                        .protectedResourceMetadataCustomizer(metadata -> metadata
+                                .resource(resource)
+                                .authorizationServer(issuer)
+                                .resourceName(resourceName)
+                                .tlsClientCertificateBoundAccessTokens(false))
+                        .oauth2ResourceServer(resourceServer -> resourceServer
+                                .authenticationEntryPoint(resourceMetadataEntryPoint(issuer + PROTECTED_RESOURCE_METADATA + endpoint))))
+                .sessionManagement(sessionManagement -> sessionManagement.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .csrf(AbstractHttpConfigurer::disable)
+                .cors(Customizer.withDefaults());
     }
 
     private static JwtDecoder validating(final JwtDecoder jwtDecoder, final OAuth2TokenValidator<Jwt> validator) {

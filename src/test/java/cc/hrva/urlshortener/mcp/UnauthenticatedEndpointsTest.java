@@ -8,12 +8,12 @@ import cc.hrva.urlshortener.configuration.JacksonConfiguration;
 import cc.hrva.urlshortener.configuration.SecurityConfiguration;
 import cc.hrva.urlshortener.configuration.WebConfiguration;
 import cc.hrva.urlshortener.controller.UrlRedirectController;
+import cc.hrva.urlshortener.mcp.admin.AdminMcpServerConfiguration;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
 import cc.hrva.urlshortener.mcp.bridge.InMemoryRedis;
 import cc.hrva.urlshortener.mcp.tools.LinkTools;
 import cc.hrva.urlshortener.mcp.tools.McpUserResolver;
-import cc.hrva.urlshortener.mcp.tools.ModerationTools;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
@@ -411,7 +411,7 @@ class UnauthenticatedEndpointsTest {
             ClockConfiguration.class,
             McpUserResolver.class,
             LinkTools.class,
-            ModerationTools.class,
+            AdminMcpServerConfiguration.class,
             ShortLinks.class,
             RedisFixedWindowRateLimiter.class
     })

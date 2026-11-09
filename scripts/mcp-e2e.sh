@@ -61,7 +61,10 @@
 # doesn't clear the network, hashed keys, the admin list and clearing it).
 # Section 14 first checks that admin@localhost, whose two-step sign-in is off, gets the 403 "Turn on two-step sign-in to use admin pages."
 # on an admin page and on GET /api/v1/users while its own /users/me and two-step setting work, then sets two_step_enabled in Postgres, so the
-# same token opens admin pages from then on. Section 20 reads the reset token from the link in the email (Mailpit's API port is published on a
+# same token opens admin pages from then on. Section 14b checks the admin MCP endpoint /mcp/admin: its own 401 and protected resource
+# metadata, a client registered for it, admin@localhost (two-step on) listing and running the eight moderation tools there, a refresh
+# without resource keeping the /mcp/admin audience, user@localhost's token refused with 403, /mcp and /mcp/admin tokens refused on each
+# other's endpoint, and the MCP Inspector signing in to /mcp/admin on its own. Section 20 reads the reset token from the link in the email (Mailpit's API port is published on a
 # random loopback port too). Section 30 checks v2.23's accounts work: a password sign-in is a 503 with Retry-After while Redis doesn't answer
 # (CLIENT PAUSE), reset tokens (041, only the SHA-256 stored, an hour, used once, an expired one refused), the account email limits per
 # address and per network (the same 202, then a 429), sign-up answering a taken address like a new one (the note email, nothing created, a new
@@ -564,8 +567,8 @@ sed 's/^/  /' "$MCP_E2E_BROWSER_LOG"
 echo "  --- tools/list result"
 show "$(jq -r '.tools[] | "\(.name): \(.title // "")"' <<<"$INSPECTOR_RESULT")"
 expect_eq "$(jq -r '[.tools[].name] | sort | join(",")' <<<"$INSPECTOR_RESULT")" \
-    "block_domain,block_link,block_user,check_url,delete_link,link_stats,list_links,moderation_summary,possible_scammers,review_queue,shorten_url" \
-    "the three link tools and the eight moderation tools (admin only when called)"
+    "link_stats,list_links,shorten_url" \
+    "the three link tools, and no moderation tools (those are on /mcp/admin, section 14b)"
 echo "  --- what the Inspector registered (oauth2_registered_client)"
 psql_query "select client_name, client_authentication_methods, authorization_grant_types, redirect_uris, scopes from oauth2_registered_client order by client_id_issued_at;"
 
@@ -775,6 +778,106 @@ http "$BASE/$IDN_ALIAS"
 show "GET $BASE/$IDN_ALIAS -> $HTTP_STATUS Location: $HTTP_LOCATION"
 expect_eq "$HTTP_STATUS" 302 "the accented destination redirects"
 expect_eq "$HTTP_LOCATION" "https://xn--okolada-i6a.hr/torta" "with its host in punycode, so the Location header is ASCII"
+
+section "14b. The admin MCP endpoint: the moderation tools for an admin with two-step sign-in, and nobody else"
+ADMIN_RESOURCE=$BASE/mcp/admin
+ADMIN_REDIRECT_URI=http://localhost:53682/callback
+TOOL_NAMES='[.result.tools[].name] | sort | join(",")'
+MODERATION_TOOLS=block_domain,block_link,block_user,check_url,delete_link,moderation_summary,possible_scammers,review_queue
+mcp_post /mcp/admin "" "$INITIALIZE"
+expect_eq "$HTTP_STATUS" 401 "POST /mcp/admin without a token is refused"
+expect_eq "$(header_value www-authenticate)" "Bearer resource_metadata=\"$BASE/.well-known/oauth-protected-resource/mcp/admin\"" \
+    "the 401 points at /mcp/admin's own protected resource metadata"
+http "$BASE/.well-known/oauth-protected-resource/mcp/admin"
+show "$(jq -c '{resource, authorization_servers, resource_name}' <<<"$HTTP_BODY")"
+expect_eq "$(jq -c '[.resource, .authorization_servers]' <<<"$HTTP_BODY")" "[\"$ADMIN_RESOURCE\",[\"$BASE\"]]" \
+    "the metadata names \${issuer}/mcp/admin and the same authorization server"
+http "$BASE/.well-known/oauth-protected-resource/mcp"
+expect_eq "$(jq -r .resource <<<"$HTTP_BODY")" "$RESOURCE" "/mcp's metadata still names \${issuer}/mcp"
+http -X POST "$BASE/oauth2/register" -H 'Content-Type: application/json' \
+    -d "{\"client_name\":\"hrva e2e admin (curl)\",\"redirect_uris\":[\"$ADMIN_REDIRECT_URI\"],\"grant_types\":[\"authorization_code\",\"refresh_token\"],\"response_types\":[\"code\"],\"token_endpoint_auth_method\":\"none\"}"
+expect_eq "$HTTP_STATUS" 201 "a client registered for the admin endpoint (used for every sign-in below)"
+ADMIN_CLIENT_ID=$(jq -r .client_id <<<"$HTTP_BODY")
+
+# mcp_sign_in <app JWT> <resource>: sections 2 to 5 as one step for ADMIN_CLIENT_ID (authorize, approve as the frontend, continue,
+# code -> tokens with PKCE and resource). Sets SIGNED_IN_ACCESS_TOKEN and SIGNED_IN_REFRESH_TOKEN.
+mcp_sign_in() {
+    local verifier challenge cookies handle code
+    verifier=$(openssl rand -hex 32)
+    challenge=$(printf '%s' "$verifier" | openssl dgst -sha256 -binary | b64url)
+    cookies=$(mktemp "$WORK/sign-in-cookies.XXXXXX")
+    http -c "$cookies" -b "$cookies" "$BASE/oauth2/authorize?response_type=code&client_id=$(urlencode "$ADMIN_CLIENT_ID")&redirect_uri=$(urlencode "$ADMIN_REDIRECT_URI")&state=$(openssl rand -hex 8)&code_challenge=$challenge&code_challenge_method=S256&resource=$(urlencode "$2")"
+    [[ $HTTP_STATUS == 302 && $HTTP_LOCATION == "$FRONTEND_URL/connect?request="* ]] || fail "authorize for $2: expected a 302 to /connect, got $HTTP_STATUS"
+    handle=${HTTP_LOCATION##*request=}
+    http -X POST -H "Authorization: Bearer $1" -H "Origin: $FRONTEND_URL" "$BASE/api/v1/connect/requests/$handle/approve"
+    [[ $HTTP_STATUS == 200 ]] || fail "approve for $2: expected 200, got $HTTP_STATUS"
+    http -c "$cookies" -b "$cookies" "$(jq -r .continueUrl <<<"$HTTP_BODY")"
+    http -c "$cookies" -b "$cookies" "$HTTP_LOCATION"
+    [[ $HTTP_LOCATION == "$ADMIN_REDIRECT_URI?code="* ]] || fail "authorize for $2: no code delivered (status $HTTP_STATUS)"
+    code=$(sed -E 's/.*[?&]code=([^&]*).*/\1/' <<<"$HTTP_LOCATION")
+    http -X POST "$BASE/oauth2/token" \
+        --data-urlencode grant_type=authorization_code \
+        --data-urlencode "code=$code" \
+        --data-urlencode "redirect_uri=$ADMIN_REDIRECT_URI" \
+        --data-urlencode "client_id=$ADMIN_CLIENT_ID" \
+        --data-urlencode "code_verifier=$verifier" \
+        --data-urlencode "resource=$2"
+    [[ $HTTP_STATUS == 200 ]] || fail "token for $2: expected 200, got $HTTP_STATUS $HTTP_BODY"
+    SIGNED_IN_ACCESS_TOKEN=$(jq -r .access_token <<<"$HTTP_BODY")
+    SIGNED_IN_REFRESH_TOKEN=$(jq -r .refresh_token <<<"$HTTP_BODY")
+}
+
+audience_of() {
+    jwt_claims "$1" | jq -r '.aud | if type == "array" then join(",") else . end'
+}
+
+echo "  --- admin@localhost (two-step on since section 14) signs in for /mcp/admin"
+mcp_sign_in "$ADMIN_JWT" "$ADMIN_RESOURCE"
+ADMIN_MCP_TOKEN=$SIGNED_IN_ACCESS_TOKEN
+ADMIN_MCP_REFRESH_TOKEN=$SIGNED_IN_REFRESH_TOKEN
+expect_eq "$(audience_of "$ADMIN_MCP_TOKEN")" "$ADMIN_RESOURCE" "the token's audience is \${issuer}/mcp/admin"
+mcp_post /mcp/admin "$ADMIN_MCP_TOKEN" "$TOOLS_LIST"
+expect_eq "$HTTP_STATUS" 200 "tools/list on /mcp/admin as the admin"
+show "$(jq -r '.result.tools[] | "\(.name): readOnly=\(.annotations.readOnlyHint) destructive=\(.annotations.destructiveHint) openWorld=\(.annotations.openWorldHint)"' <<<"$HTTP_BODY")"
+expect_eq "$(jq -r "$TOOL_NAMES" <<<"$HTTP_BODY")" "$MODERATION_TOOLS" "the eight moderation tools, and no link tools"
+expect_eq "$(jq -r '[.result.tools[] | select(.annotations.destructiveHint) | .name] | sort | join(",")' <<<"$HTTP_BODY")" \
+    "block_domain,block_link,block_user,delete_link" "destructiveHint on the blocks and delete_link"
+mcp_post /mcp/admin "$ADMIN_MCP_TOKEN" '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"moderation_summary","arguments":{}}}'
+show "$(jq -r '.result.content[0].text' <<<"$HTTP_BODY")"
+expect_eq "$HTTP_STATUS $(jq -r .result.isError <<<"$HTTP_BODY")" "200 false" "moderation_summary runs as the admin"
+http -X POST "$BASE/oauth2/token" \
+    --data-urlencode grant_type=refresh_token \
+    --data-urlencode "refresh_token=$ADMIN_MCP_REFRESH_TOKEN" \
+    --data-urlencode "client_id=$ADMIN_CLIENT_ID"
+expect_eq "$HTTP_STATUS" 200 "a refresh without resource"
+REFRESHED_ADMIN_MCP_TOKEN=$(jq -r .access_token <<<"$HTTP_BODY")
+expect_eq "$(audience_of "$REFRESHED_ADMIN_MCP_TOKEN")" "$ADMIN_RESOURCE" "keeps the /mcp/admin audience of the sign-in"
+mcp_post /mcp/admin "$REFRESHED_ADMIN_MCP_TOKEN" "$TOOLS_LIST"
+expect_eq "$HTTP_STATUS" 200 "and the refreshed token opens /mcp/admin"
+
+echo "  --- user@localhost signs in for /mcp/admin"
+mcp_sign_in "$APP_JWT" "$ADMIN_RESOURCE"
+expect_eq "$(audience_of "$SIGNED_IN_ACCESS_TOKEN")" "$ADMIN_RESOURCE" "the user gets a /mcp/admin token"
+mcp_post /mcp/admin "$SIGNED_IN_ACCESS_TOKEN" "$TOOLS_LIST"
+expect_eq "$HTTP_STATUS" 403 "but /mcp/admin refuses it with 403"
+expect_eq "$(jq -r '.result.tools // empty' <<<"$HTTP_BODY" 2>/dev/null)" "" "and lists no tools"
+
+echo "  --- admin@localhost signs in for /mcp"
+mcp_sign_in "$ADMIN_JWT" "$RESOURCE"
+expect_eq "$(audience_of "$SIGNED_IN_ACCESS_TOKEN")" "$RESOURCE" "the token's audience is \${issuer}/mcp"
+mcp_post /mcp/admin "$SIGNED_IN_ACCESS_TOKEN" "$TOOLS_LIST"
+expect_eq "$HTTP_STATUS" 401 "a /mcp token doesn't open /mcp/admin, even the admin's"
+expect_contains "$(header_value www-authenticate)" 'error="invalid_token"' "it is an invalid token there"
+mcp_post /mcp "$SIGNED_IN_ACCESS_TOKEN" "$TOOLS_LIST"
+expect_eq "$HTTP_STATUS $(jq -r "$TOOL_NAMES" <<<"$HTTP_BODY")" "200 link_stats,list_links,shorten_url" "the admin's /mcp lists only the three link tools"
+mcp_post /mcp "$ADMIN_MCP_TOKEN" "$TOOLS_LIST"
+expect_eq "$HTTP_STATUS" 401 "and a /mcp/admin token doesn't open /mcp"
+
+echo "  --- the MCP Inspector signs in to /mcp/admin on its own, approved by admin@localhost"
+MCP_E2E_APP_JWT=$ADMIN_JWT PATH="$SCRIPT_DIR/mcp-e2e/fake-browser:$PATH" MCP_AUTO_OPEN_ENABLED=true \
+    inspector 120 "$ADMIN_RESOURCE" --transport http --callback-url "http://127.0.0.1:$CALLBACK_PORT/oauth/callback" --method tools/list
+expect_eq "$(jq -r '[.tools[].name] | sort | join(",")' <<<"$INSPECTOR_RESULT")" "$MODERATION_TOOLS" \
+    "the Inspector finds /mcp/admin's metadata, registers, signs in and lists the eight moderation tools"
 
 section "15. Passkey options (curl)"
 http -X POST "$BASE/api/v1/auth/passkeys/options"
@@ -2923,7 +3026,7 @@ expect_eq "$HTTP_STATUS" 200 "the admin blocks e2e-edit-blocked.com"
 EDIT_RULE_ID=$(jq -r .rule.id <<<"$HTTP_BODY")
 edit_link "$EDIT_ID" '"longUrl":"https://e2e-edit-blocked.com/x"'
 expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" \
-    "400 This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us." "a blocked destination is refused like a new link"
+    "400 This destination is on a blocklist and can't be shortened. If you think that's a mistake, write to support@hrva.cc." "a blocked destination is refused like a new link"
 edit_link "$EDIT_ID" '"longUrl":"https://bit.ly/e2e-edit"'
 expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" \
     "400 Links to other URL shorteners can't be shortened. Use the final destination instead." "another shortener is refused like a new link"

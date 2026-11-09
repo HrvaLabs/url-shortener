@@ -97,7 +97,7 @@ public class LinkTools {
                     + "website. Returns the full short URL and its destination, plus the visit limit and expiry "
                     + "when set. Every link created here gets the tag ai. A refused call creates nothing and "
                     + "returns the reason, for example \"This destination is on a blocklist and can't be shortened. "
-                    + "If you think that's a mistake, contact us.\", \"Links to hrva.cc can't be shortened again. "
+                    + "If you think that's a mistake, write to support@hrva.cc.\", \"Links to hrva.cc can't be shortened again. "
                     + "Use the final destination instead.\", \"This short URL is already taken. Try "
                     + "another.\" or \"Custom short URL can only contain letters, numbers, hyphens and underscores\". "
                     + "Once the visit limit is used up or the expiry has passed, the short link stops redirecting "
@@ -108,7 +108,7 @@ public class LinkTools {
                     readOnlyHint = false,
                     destructiveHint = false,
                     idempotentHint = false,
-                    openWorldHint = false
+                    openWorldHint = true
             )
     )
     public CallToolResult shortenUrl(

@@ -157,7 +157,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class UrlServiceTest {
 
-    private static final String BLOCKLIST_REFUSAL = "This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us.";
+    private static final String BLOCKLIST_REFUSAL = "This destination is on a blocklist and can't be shortened. If you think that's a mistake, write to support@hrva.cc.";
     private static final String OWN_LINK_REFUSAL = "Links to hrva.cc can't be shortened again. Use the final destination instead.";
     private static final List<String> YOUNG_DOMAIN = List.of("domain registered in the last 30 days");
     private static final String CAMPAIGN_LINK = "https://ll.omaehhm.com/wqamhcsom/?r=plfN8D&t=1793210826";

@@ -77,6 +77,7 @@ class PublicClientRefreshTest {
 
     private static final String ISSUER = "https://hrva.cc";
     private static final String RESOURCE = ISSUER + "/mcp";
+    private static final String ADMIN_RESOURCE = ISSUER + "/mcp/admin";
     private static final String EMAIL = "user@localhost";
     private static final Duration REFRESH_TOKEN_TIME_TO_LIVE = Duration.ofDays(30);
     private static final String PUBLIC_REGISTRATION = """
@@ -212,6 +213,55 @@ class PublicClientRefreshTest {
         assertThat(mcpJwtDecoder.decode((String) refreshed.get("access_token")).getAudience()).containsExactly(RESOURCE);
         mockMvc.perform(mcpRequest().header(HttpHeaders.AUTHORIZATION, "Bearer " + refreshed.get("access_token")))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void theAdminResourceGetsTheAdminAudience() throws Exception {
+        final var clientId = accessTokens.register(PUBLIC_REGISTRATION);
+        final var code = accessTokens.authorize(clientId, EMAIL, ADMIN_RESOURCE);
+        final var body = mockMvc.perform(codeExchangeRequestWithoutResource(clientId, code).param("resource", ADMIN_RESOURCE))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(mcpJwtDecoder.decode(JsonPath.read(body, "$.access_token")).getAudience()).containsExactly(ADMIN_RESOURCE);
+
+        final var refreshed = refresh(clientId, JsonPath.read(body, "$.refresh_token"), ADMIN_RESOURCE);
+
+        assertThat(mcpJwtDecoder.decode((String) refreshed.get("access_token")).getAudience()).containsExactly(ADMIN_RESOURCE);
+    }
+
+    @Test
+    void anAdminSignInKeepsTheAdminAudienceWithoutResource() throws Exception {
+        final var clientId = accessTokens.register(PUBLIC_REGISTRATION);
+        final var code = accessTokens.authorize(clientId, EMAIL, ADMIN_RESOURCE);
+        final var body = mockMvc.perform(codeExchangeRequestWithoutResource(clientId, code))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(mcpJwtDecoder.decode(JsonPath.read(body, "$.access_token")).getAudience()).containsExactly(ADMIN_RESOURCE);
+
+        final var firstRefresh = refresh(clientId, JsonPath.read(body, "$.refresh_token"), null);
+        final var secondRefresh = refresh(clientId, (String) firstRefresh.get("refresh_token"), null);
+
+        assertThat(mcpJwtDecoder.decode((String) firstRefresh.get("access_token")).getAudience()).containsExactly(ADMIN_RESOURCE);
+        assertThat(mcpJwtDecoder.decode((String) secondRefresh.get("access_token")).getAudience()).containsExactly(ADMIN_RESOURCE);
+    }
+
+    @Test
+    void aForeignResourceInTheSignInStillGetsTheMcpAudience() throws Exception {
+        final var clientId = accessTokens.register(PUBLIC_REGISTRATION);
+        final var code = accessTokens.authorize(clientId, EMAIL, FOREIGN_RESOURCE);
+        final var body = mockMvc.perform(codeExchangeRequestWithoutResource(clientId, code))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(mcpJwtDecoder.decode(JsonPath.read(body, "$.access_token")).getAudience()).containsExactly(RESOURCE);
     }
 
     @Test

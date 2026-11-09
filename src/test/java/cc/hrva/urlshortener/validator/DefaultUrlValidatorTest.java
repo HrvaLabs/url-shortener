@@ -88,7 +88,19 @@ class DefaultUrlValidatorTest {
 
         assertThatThrownBy(() -> urlValidator.checkIfLongUrlIsNotBlocklisted(url))
                 .isInstanceOf(UrlValidationException.class)
-                .hasMessage("This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us.");
+                .hasMessage("This destination is on a blocklist and can't be shortened. If you think that's a mistake, write to support@hrva.cc.");
+    }
+
+    @Test
+    void theBlocklistRefusalNamesTheSupportAddress() {
+        final var url = Url.builder().longUrl("https://njuskaio.cam/a/MAUB3").build();
+        when(linkCheckService.check("https://njuskaio.cam/a/MAUB3")).thenReturn(new LinkVerdict(
+                Outcome.BLOCK, List.of("on list HaGeZi TIF medium"), BlockReason.BLOCKLIST, "HaGeZi TIF medium"));
+
+        assertThatThrownBy(() -> urlValidator.checkIfLongUrlIsNotBlocklisted(url))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessageEndingWith(" If you think that's a mistake, write to support@hrva.cc.")
+                .message().doesNotContainIgnoringCase("contact us");
     }
 
     @Test
@@ -171,7 +183,7 @@ class DefaultUrlValidatorTest {
 
         assertThatThrownBy(() -> urlValidator.checkIfUrlNotBlocked(url))
                 .isInstanceOf(UrlValidationException.class)
-                .hasMessage("This link was blocked as unsafe. Contact support if you think that's a mistake.");
+                .hasMessage("This link was blocked as unsafe. If you think that's a mistake, write to support@hrva.cc.");
     }
 
     @Test
@@ -195,7 +207,7 @@ class DefaultUrlValidatorTest {
 
         assertThatThrownBy(() -> urlValidator.checkIfUrlNotBlocked(url))
                 .isInstanceOf(UrlValidationException.class)
-                .hasMessage("This link was blocked as unsafe. Contact support if you think that's a mistake.");
+                .hasMessage("This link was blocked as unsafe. If you think that's a mistake, write to support@hrva.cc.");
     }
 
     @Test
@@ -257,7 +269,7 @@ class DefaultUrlValidatorTest {
 
         assertThatThrownBy(() -> urlValidator.checkIfDestinationNotBlocked(url))
                 .isInstanceOf(UrlValidationException.class)
-                .hasMessage("This destination is on a blocklist and can't be shortened. If you think that's a mistake, contact us.");
+                .hasMessage("This destination is on a blocklist and can't be shortened. If you think that's a mistake, write to support@hrva.cc.");
         verify(linkCheckService, never()).isAllowListed(anyString());
     }
 
