@@ -78,6 +78,7 @@ class EveryEndpointIsPublicOrSignedInTest {
             "GET /api/changelog",
             "GET /api/v1/public/settings",
             "GET /api/v1/public/stats",
+            "GET /api/v1/public/alias-check",
             "GET /api/v1/public/bio-pages/{handle}",
             "POST /api/v1/public/bio-pages/{handle}/views",
             "POST /api/v1/reports",

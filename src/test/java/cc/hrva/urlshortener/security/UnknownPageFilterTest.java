@@ -2,6 +2,8 @@ package cc.hrva.urlshortener.security;
 
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -72,6 +74,17 @@ class UnknownPageFilterTest {
             "GET|abc/def|false"})
     void onlyAGetOrHeadOfAPathBelowAnUnservedFirstSegmentIsAnUnknownPage(final String method, final String path, final boolean unknown) {
         assertThat(UnknownPageFilter.isUnknownPage(method, path)).isEqualTo(unknown);
+    }
+
+    @ParameterizedTest
+    @MethodSource("allowedAliasCharacters")
+    void everyAllowedAliasCharacterReachesTheLookup(final String character) {
+        assertThat(UnknownPageFilter.isUnknownPage("GET", "/a" + character)).isFalse();
+        assertThat(UnknownPageFilter.isUnknownPage("GET", "/" + character + character)).isFalse();
+    }
+
+    private static Stream<String> allowedAliasCharacters() {
+        return "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-".chars().mapToObj(Character::toString);
     }
 
 }

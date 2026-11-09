@@ -26,6 +26,7 @@ final class PublicRoutes {
             get("/api/changelog"),
             get("/api/v1/public/settings"),
             get("/api/v1/public/stats"),
+            get("/api/v1/public/alias-check"),
             get("/api/v1/public/bio-pages/*"),
             post("/api/v1/public/bio-pages/*/views"),
             post(ReportController.REPORTS_ENDPOINT),
