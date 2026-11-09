@@ -63,10 +63,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -237,16 +239,17 @@ class CustomDomainRemovalTest {
         final var domain = domain("go.example.com", "ACTIVE", "cf-1");
         final var menu = link(domain, "menu", true);
         final var planted = new AtomicBoolean();
-        when(reservedAliasService.isReserved(anyString())).thenAnswer(invocation -> {
-            if ("menu".equals(invocation.getArgument(0)) && planted.compareAndSet(false, true)) {
+        doAnswer(invocation -> {
+            if (planted.compareAndSet(false, true)) {
                 CompletableFuture.runAsync(() -> hrvaLink("menu", true)).join();
             }
-            return false;
-        });
+            return invocation.callRealMethod();
+        }).when(urlDomainMoves).moveToPrimary(anyLong(), anyLong(), anyString());
 
         final var response = customDomainRemoval.remove(domain, DomainLinkMode.MOVE, OWNER);
 
         assertThat(planted).isTrue();
+        verify(urlDomainMoves, times(2)).moveToPrimary(anyLong(), anyLong(), anyString());
         assertThat(response).isEqualTo(new DomainRemovalResponse(1, List.of(new DomainRename("menu", "k3J9x")), 0));
         assertThat(jdbcTemplate.queryForMap("select domain_id, short_url from url where id = ?", menu))
                 .containsEntry("DOMAIN_ID", null).containsEntry("SHORT_URL", "k3J9x");

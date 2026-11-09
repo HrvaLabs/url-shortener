@@ -783,9 +783,9 @@ class CustomDomainSchemaTest {
         assertThat(urlRepository.findActive(domain.getId(), "menu")).map(Url::getId).contains(onDomain.getId());
         assertThat(urlRepository.findActive(domain.getId(), "old")).isEmpty();
         assertThat(urlRepository.findActive(null, "menu")).map(Url::getId).contains(hrva.getId());
-        assertThat(urlRepository.aliasTaken(null, "old")).isFalse();
-        assertThat(urlRepository.aliasTaken(domain.getId(), "old")).isTrue();
-        assertThat(urlRepository.aliasTaken(other.getId(), "menu")).isFalse();
+        assertThat(urlRepository.aliasTakenIgnoringCase(null, "old")).isFalse();
+        assertThat(urlRepository.aliasTakenIgnoringCase(domain.getId(), "old")).isTrue();
+        assertThat(urlRepository.aliasTakenIgnoringCase(other.getId(), "menu")).isFalse();
         assertThat(urlRepository.aliasActive(domain.getId(), "old")).isFalse();
         assertThat(urlRepository.aliasActive(domain.getId(), "menu")).isTrue();
         assertThat(urlRepository.aliasActive(null, "menu")).isTrue();

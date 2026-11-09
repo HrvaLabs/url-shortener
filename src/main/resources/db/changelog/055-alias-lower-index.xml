@@ -6,9 +6,10 @@
         https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
 
     <changeSet author="khrvacic" id="055-url-lower-short-url-index" dbms="postgresql">
-        <sql>CREATE INDEX ix_url_domain_lower_short_url ON url (domain_id, lower(short_url))</sql>
+        <comment>The case-insensitive alias lookup: domain_id = ? and lower(short_url) = lower(?), used by the create check, the public alias check and domain removal. Not unique, because older case pairs exist.</comment>
+        <sql>create index if not exists ix_url_domain_lower_short_url ON url (domain_id, lower(short_url))</sql>
         <rollback>
-            <sql>DROP INDEX ix_url_domain_lower_short_url</sql>
+            <sql>drop index if exists ix_url_domain_lower_short_url</sql>
         </rollback>
     </changeSet>
 

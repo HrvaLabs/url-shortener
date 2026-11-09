@@ -18,11 +18,9 @@ public interface UrlValidator {
     LinkVerdict destinationVerdict(Url url);
     void verifyUserAdminOrOwner(Url url);
     void checkIfAnonymousUrlCreationEnabled();
-    void checkIfShortUrlIsUnique(Long domainId, String shortUrl);
     void checkIfShortUrlIsFreeToReactivate(Long domainId, String shortUrl);
     void checkIfUrlNotBlocked(Url url);
     LinkVerdict checkIfDestinationNotBlocked(Url url);
-    void checkIfShortUrlIsReserved(String shortUrl);
     void checkIfUrlExpirationDateIsInThePast(Url url);
 
 }

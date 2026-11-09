@@ -113,13 +113,6 @@ public class DefaultUrlValidator implements UrlValidator {
     }
 
     @Override
-    public void checkIfShortUrlIsUnique(final Long domainId, final String shortUrl) {
-        if (urlRepository.aliasTaken(domainId, shortUrl)) {
-            throw new ShortUrlAlreadyExistsException(SHORT_URL_TAKEN);
-        }
-    }
-
-    @Override
     public void checkIfShortUrlIsFreeToReactivate(final Long domainId, final String shortUrl) {
         if (urlRepository.aliasActive(domainId, shortUrl)) {
             throw new ShortUrlAlreadyExistsException("Another active link already uses this short URL.");
@@ -150,13 +143,6 @@ public class DefaultUrlValidator implements UrlValidator {
             throw new UrlValidationException(admin ? STILL_BLOCKED + String.join(REASON_SEPARATOR, verdict.reasons()) : BLOCKLISTED);
         }
         return verdict;
-    }
-
-    @Override
-    public void checkIfShortUrlIsReserved(final String shortUrl) {
-        if (reservedAliasService.isReserved(shortUrl)) {
-            throw new ShortUrlAlreadyExistsException("This short URL is reserved. Try another.");
-        }
     }
 
     @Override

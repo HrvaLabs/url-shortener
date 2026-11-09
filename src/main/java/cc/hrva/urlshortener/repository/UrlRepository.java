@@ -35,10 +35,6 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
         return domainId == null ? findByDomainIsNullAndShortUrlAndActiveTrue(alias) : findByDomain_IdAndShortUrlAndActiveTrue(domainId, alias);
     }
 
-    default boolean aliasTaken(final Long domainId, final String alias) {
-        return domainId == null ? existsByDomainIsNullAndShortUrl(alias) : existsByDomain_IdAndShortUrl(domainId, alias);
-    }
-
     default boolean aliasTakenIgnoringCase(final Long domainId, final String alias) {
         return domainId == null ? hrvaAliasTakenIgnoringCase(alias) : domainAliasTakenIgnoringCase(domainId, alias);
     }
@@ -69,8 +65,6 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     Optional<Url> findFirstByDomain_IdAndShortUrlOrderByActiveDescIdDesc(Long domainId, String alias);
     Optional<Url> findByDomainIsNullAndShortUrlAndActiveTrue(String alias);
     Optional<Url> findByDomain_IdAndShortUrlAndActiveTrue(Long domainId, String alias);
-    boolean existsByDomainIsNullAndShortUrl(String alias);
-    boolean existsByDomain_IdAndShortUrl(Long domainId, String alias);
     boolean existsByDomainIsNullAndShortUrlAndActiveTrue(String alias);
     boolean existsByDomain_IdAndShortUrlAndActiveTrue(Long domainId, String alias);
     long countByDomain_Id(Long domainId);

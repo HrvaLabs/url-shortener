@@ -2788,7 +2788,6 @@ class UrlServiceTest {
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage(CUSTOM_ALIASES_OFF);
 
-        verify(urlValidator, never()).checkIfShortUrlIsUnique(any(), anyString());
         verify(urlRepository, never()).save(any());
     }
 

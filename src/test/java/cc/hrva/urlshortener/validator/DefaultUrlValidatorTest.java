@@ -143,47 +143,12 @@ class DefaultUrlValidatorTest {
     }
 
     @Test
-    void shouldValidateShortUrlIsUnique() {
-        final String shortUrl = "test";
-        when(urlRepository.aliasTaken(null, shortUrl)).thenReturn(false);
-        assertThatCode(() -> urlValidator.checkIfShortUrlIsUnique(null, shortUrl))
-                .doesNotThrowAnyException();
-    }
-
-    @Test
-    void anAliasStaysTakenAfterItsLinkIsDeactivated() {
-        when(urlRepository.aliasTaken(null, "promo")).thenReturn(true);
-
-        assertThatThrownBy(() -> urlValidator.checkIfShortUrlIsUnique(null, "promo"))
-                .isInstanceOf(ShortUrlAlreadyExistsException.class)
-                .hasMessage("This short URL is already taken. Try another.");
-    }
-
-    @Test
     void reactivationIsRefusedWhileAnotherActiveLinkUsesTheAlias() {
         when(urlRepository.aliasActive(null, "promo")).thenReturn(true);
 
         assertThatThrownBy(() -> urlValidator.checkIfShortUrlIsFreeToReactivate(null, "promo"))
                 .isInstanceOf(ShortUrlAlreadyExistsException.class)
                 .hasMessage("Another active link already uses this short URL.");
-    }
-
-    @Test
-    void aTakenAliasOnTheSameDomainIs409() {
-        when(urlRepository.aliasTaken(7L, "menu")).thenReturn(true);
-
-        assertThatThrownBy(() -> urlValidator.checkIfShortUrlIsUnique(7L, "menu"))
-                .isInstanceOf(ShortUrlAlreadyExistsException.class)
-                .hasMessage("This short URL is already taken. Try another.");
-    }
-
-    @Test
-    void anAliasTakenOnHrvaIsFreeOnADomain() {
-        when(urlRepository.aliasTaken(7L, "menu")).thenReturn(false);
-
-        assertThatCode(() -> urlValidator.checkIfShortUrlIsUnique(7L, "menu")).doesNotThrowAnyException();
-
-        verify(urlRepository, never()).aliasTaken(isNull(), anyString());
     }
 
     @Test
@@ -306,15 +271,6 @@ class DefaultUrlValidatorTest {
     }
 
     @Test
-    void shouldFailValidateShortUrlIsUnique() {
-        final String shortUrl = "test";
-        when(urlRepository.aliasTaken(null, shortUrl)).thenReturn(true);
-        assertThatThrownBy(() -> urlValidator.checkIfShortUrlIsUnique(null, shortUrl))
-                .isInstanceOf(ShortUrlAlreadyExistsException.class)
-                .hasMessage("This short URL is already taken. Try another.");
-    }
-
-    @Test
     void anAdminWithoutTwoStepIsToldToTurnItOnToEditOtherPeoplesLinks() {
         final var pending = userWithRole(3L, "ROLE_ADMIN");
         pending.setTwoStepEnabled(false);
@@ -379,32 +335,6 @@ class DefaultUrlValidatorTest {
         when(userService.getUserFromToken()).thenReturn(userWithRole(1L, "ROLE_USER"));
 
         assertThatCode(() -> urlValidator.verifyUserAdminOrOwner(url))
-                .doesNotThrowAnyException();
-    }
-
-    @Test
-    void shouldRejectMcpAsReservedAlias() {
-        when(reservedAliasService.isReserved("MCP")).thenReturn(true);
-
-        assertThatThrownBy(() -> urlValidator.checkIfShortUrlIsReserved("MCP"))
-                .isInstanceOf(ShortUrlAlreadyExistsException.class)
-                .hasMessage("This short URL is reserved. Try another.");
-    }
-
-    @Test
-    void shouldRejectACustomReservedAlias() {
-        when(reservedAliasService.isReserved("Promo")).thenReturn(true);
-
-        assertThatThrownBy(() -> urlValidator.checkIfShortUrlIsReserved("Promo"))
-                .isInstanceOf(ShortUrlAlreadyExistsException.class)
-                .hasMessage("This short URL is reserved. Try another.");
-    }
-
-    @Test
-    void shouldAllowAnAliasThatIsNotReserved() {
-        when(reservedAliasService.isReserved("summer-menu")).thenReturn(false);
-
-        assertThatCode(() -> urlValidator.checkIfShortUrlIsReserved("summer-menu"))
                 .doesNotThrowAnyException();
     }
 
