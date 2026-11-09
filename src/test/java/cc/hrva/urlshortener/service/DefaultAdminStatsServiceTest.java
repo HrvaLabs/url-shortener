@@ -31,6 +31,7 @@ import cc.hrva.urlshortener.service.stats.StatsWindow;
 import cc.hrva.urlshortener.service.stats.SystemStats;
 import cc.hrva.urlshortener.service.stats.TrafficStats;
 import cc.hrva.urlshortener.service.stats.UsersStats;
+import cc.hrva.urlshortener.service.stats.VisitStats;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -78,11 +79,14 @@ class DefaultAdminStatsServiceTest {
     @Mock
     private SystemStats systemStats;
 
+    @Mock
+    private VisitStats visitStats;
+
     private AdminStatsService adminStatsService;
 
     @BeforeEach
     void setUp() {
-        this.adminStatsService = new DefaultAdminStatsService(statsDays, trafficStats, linksStats, usersStats, safetyStats, systemStats);
+        this.adminStatsService = new DefaultAdminStatsService(statsDays, trafficStats, linksStats, usersStats, safetyStats, systemStats, visitStats);
     }
 
     @Test

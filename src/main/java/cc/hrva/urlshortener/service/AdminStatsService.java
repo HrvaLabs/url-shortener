@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.dto.stats.SafetyStatsResponse;
 import cc.hrva.urlshortener.dto.stats.SystemStatsResponse;
 import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse;
+import cc.hrva.urlshortener.dto.stats.VisitStatsResponse;
 import java.time.LocalDate;
 
 public interface AdminStatsService {
@@ -18,6 +19,8 @@ public interface AdminStatsService {
     SafetyStatsResponse safety(Integer days);
 
     SystemStatsResponse system(Integer days);
+
+    VisitStatsResponse visits(Integer days);
 
     TrafficStatsResponse traffic(LocalDate from, LocalDate to);
 

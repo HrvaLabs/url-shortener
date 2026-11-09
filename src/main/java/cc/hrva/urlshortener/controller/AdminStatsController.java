@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.dto.stats.SafetyStatsResponse;
 import cc.hrva.urlshortener.dto.stats.SystemStatsResponse;
 import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse;
+import cc.hrva.urlshortener.dto.stats.VisitStatsResponse;
 import cc.hrva.urlshortener.service.AdminStatsService;
 import io.swagger.v3.oas.annotations.Hidden;
 import lombok.RequiredArgsConstructor;
@@ -42,6 +43,11 @@ public class AdminStatsController {
     @GetMapping("/safety")
     public ResponseEntity<SafetyStatsResponse> safety(@RequestParam(name = "days", required = false) final Integer days) {
         return ResponseEntity.ok(adminStatsService.safety(days));
+    }
+
+    @GetMapping("/visits")
+    public ResponseEntity<VisitStatsResponse> visits(@RequestParam(name = "days", required = false) final Integer days) {
+        return ResponseEntity.ok(adminStatsService.visits(days));
     }
 
     @GetMapping("/system")

@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.dto.stats.SafetyStatsResponse;
 import cc.hrva.urlshortener.dto.stats.SystemStatsResponse;
 import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse;
+import cc.hrva.urlshortener.dto.stats.VisitStatsResponse;
 import cc.hrva.urlshortener.model.enums.AnalyticsRange;
 import cc.hrva.urlshortener.service.AdminStatsService;
 import cc.hrva.urlshortener.service.stats.LinksStats;
@@ -13,6 +14,7 @@ import cc.hrva.urlshortener.service.stats.StatsDays;
 import cc.hrva.urlshortener.service.stats.SystemStats;
 import cc.hrva.urlshortener.service.stats.TrafficStats;
 import cc.hrva.urlshortener.service.stats.UsersStats;
+import cc.hrva.urlshortener.service.stats.VisitStats;
 import java.time.LocalDate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -29,6 +31,7 @@ public class DefaultAdminStatsService implements AdminStatsService {
     private final UsersStats usersStats;
     private final SafetyStats safetyStats;
     private final SystemStats systemStats;
+    private final VisitStats visitStats;
 
     @Override
     public TrafficStatsResponse traffic(final Integer days) {
@@ -58,6 +61,11 @@ public class DefaultAdminStatsService implements AdminStatsService {
     public SystemStatsResponse system(final Integer days) {
         final var range = AnalyticsRange.fromDays(days);
         return systemStats.collect(statsDays.window(range));
+    }
+
+    @Override
+    public VisitStatsResponse visits(final Integer days) {
+        return visitStats.collect(AnalyticsRange.fromDays(days));
     }
 
     @Override

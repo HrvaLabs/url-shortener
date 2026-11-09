@@ -172,6 +172,8 @@ app:
     api-base: ${APP_CLOUDFLARE_API_BASE:https://api.cloudflare.com/client/v4}
     account-id: ${CLOUDFLARE_ACCOUNT_ID:}
     browser-api-token: ${CLOUDFLARE_BROWSER_API_TOKEN:}
+    analytics-api-token: ${CLOUDFLARE_ANALYTICS_API_TOKEN:}
+    landings-dataset: ${APP_CLOUDFLARE_LANDINGS_DATASET:hrva_landings}
   inspection:
     interval: ${APP_INSPECTION_INTERVAL:15s}
     keep-screenshot-days: ${APP_INSPECTION_KEEP_SCREENSHOT_DAYS:7}

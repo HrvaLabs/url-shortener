@@ -386,6 +386,12 @@ public class AppProperties {
         @ToString.Exclude
         private String browserApiToken;
 
+        @ToString.Exclude
+        private String analyticsApiToken;
+
+        @NotBlank
+        private String landingsDataset = "hrva_landings";
+
     }
 
     @Data

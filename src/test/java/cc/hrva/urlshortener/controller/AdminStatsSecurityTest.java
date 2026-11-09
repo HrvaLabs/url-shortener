@@ -23,10 +23,12 @@ import cc.hrva.urlshortener.dto.stats.SystemStatsResponse.RedisStats;
 import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse;
 import cc.hrva.urlshortener.dto.stats.TrafficStatsResponse.BioPageViewTotals;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse;
+import cc.hrva.urlshortener.dto.stats.VisitStatsResponse;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.ApiKeyCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.BioPageCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.McpCounts;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.UserInventory;
+import cc.hrva.urlshortener.exception.FeatureUnavailableException;
 import cc.hrva.urlshortener.exception.InvalidAnalyticsRangeException;
 import cc.hrva.urlshortener.mcp.McpResourceServerConfiguration;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
@@ -184,6 +186,34 @@ class AdminStatsSecurityTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.bioPageViews.views").value(40))
                 .andExpect(jsonPath("$.bioPageViews.botViews").value(6));
+    }
+
+    @Test
+    void visitsNeedAdmin() throws Exception {
+        when(adminStatsService.visits(30)).thenReturn(new VisitStatsResponse(true, 30, 30, LocalDate.of(2026, 10, 11), LocalDate.of(2026, 11, 9), 480,
+                List.of(new VisitStatsResponse.Source("chatgpt.com", "utm", 13)), List.of(new VisitStatsResponse.Page("/", 300))));
+
+        mockMvc.perform(tabRequest("visits", "admin-token").param("days", "30"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.connected").value(true))
+                .andExpect(jsonPath("$.requestedDays").value(30))
+                .andExpect(jsonPath("$.from").value("2026-10-11"))
+                .andExpect(jsonPath("$.total").value(480))
+                .andExpect(jsonPath("$.sources[0].source").value("chatgpt.com"))
+                .andExpect(jsonPath("$.sources[0].kind").value("utm"))
+                .andExpect(jsonPath("$.pages[0].page").value("/"))
+                .andExpect(jsonPath("$.pages[0].visits").value(300));
+        mockMvc.perform(tabRequest("visits", "user-token").param("days", "30")).andExpect(status().isForbidden());
+        mockMvc.perform(get(STATS + "visits").param("days", "30")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void aCloudflareFailureIs503() throws Exception {
+        when(adminStatsService.visits(30)).thenThrow(new FeatureUnavailableException("Visit counts can't be read right now. Try again later."));
+
+        mockMvc.perform(tabRequest("visits", "admin-token").param("days", "30"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.detail").value("Visit counts can't be read right now. Try again later."));
     }
 
     @ParameterizedTest
