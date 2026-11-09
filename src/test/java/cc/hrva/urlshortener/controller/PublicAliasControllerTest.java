@@ -126,6 +126,13 @@ class PublicAliasControllerTest {
     }
 
     @Test
+    void aSeparatorOnlyNameIsAvailable() throws Exception {
+        countingMockMvc().perform(get(ALIAS_CHECK).param("name", "-"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("AVAILABLE"));
+    }
+
+    @Test
     void aBrandNameIsReservedEvenForASignedInAdmin() throws Exception {
         countingMockMvc().perform(get(ALIAS_CHECK).param("name", "paypal-login")
                         .with(request -> {

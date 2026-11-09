@@ -92,7 +92,7 @@ class AliasRulesTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"support", "Admin", "hrva-support", "hrvalabs_news", "HRVA-Login", "reset-password", "sign-in", "signin", "sign_in", "verify-account", "my-login", "otp-code"})
+    @ValueSource(strings = {"support", "Admin", "hrva-support", "hrvalabs_news", "HRVA-Login", "-hrva-support", "_hrvalabs-news", "-hrvacc-security", "reset-password", "sign-in", "signin", "sign_in", "verify-account", "my-login", "otp-code"})
     void aNameThatLooksLikeAnHrvaCcPageIsReservedOnHrvaCc(final String alias) {
         assertThat(aliasRules.decide(alias, null, false))
                 .isEqualTo(new AliasDecision(AliasStatus.RESERVED, "This name looks like one of hrva.cc's own pages, so it can't be used. Try another."));
@@ -104,6 +104,13 @@ class AliasRulesTest {
     void aNameThatLooksLikeAnHrvaCcPageIsAllowedOnACustomDomainAndForAdmins(final String alias) {
         assertThat(aliasRules.decide(alias, DOMAIN, false).usable()).isTrue();
         assertThat(aliasRules.decide(alias, null, true).usable()).isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"-", "_", "--", "_-"})
+    void aNameOfOnlySeparatorsIsNotRefusedAsAPage(final String alias) {
+        assertThat(aliasRules.decide(alias, null, false).usable()).isTrue();
+        assertThat(aliasRules.decideExisting(alias, null, false).usable()).isTrue();
     }
 
     @Test

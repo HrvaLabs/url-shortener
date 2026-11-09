@@ -223,6 +223,17 @@ class CustomDomainRemovalTest {
     }
 
     @Test
+    void aMovedLinkWhoseNameIsOnlyASeparatorKeepsIt() {
+        final var domain = domain("go.example.com", "ACTIVE", "cf-1");
+        final var dash = link(domain, "-", true);
+
+        final var response = customDomainRemoval.remove(domain, DomainLinkMode.MOVE, OWNER);
+
+        assertThat(response).isEqualTo(new DomainRemovalResponse(1, List.of(), 0));
+        assertThat(aliasOf(dash)).isEqualTo("-");
+    }
+
+    @Test
     void aMovedLinkWhoseNameLooksLikeAnHrvaCcPageGetsARandomAlias() {
         final var domain = domain("go.example.com", "ACTIVE", "cf-1");
         final var support = link(domain, "support", true);

@@ -30,7 +30,7 @@ public class AliasRules {
     public static final String PATTERN_REFUSAL = "Use 1 to 32 letters, numbers, hyphens or underscores.";
 
     private static final Pattern ALIAS = Pattern.compile("[a-zA-Z0-9_-]{1,32}");
-    private static final Pattern PART_SEPARATORS = Pattern.compile("[-_]");
+    private static final String PART_SEPARATORS = "-_";
     private static final Set<String> ACCOUNT_FLOW_WORDS = Set.of("password", "passwd", "signin", "signup", "login", "logout", "verify",
             "verification", "reset", "resetpassword", "otp", "2fa", "passkey");
 
@@ -70,10 +70,10 @@ public class AliasRules {
 
     private static boolean looksLikeOwnPage(final String alias) {
         final var lower = alias.toLowerCase(Locale.ROOT);
-        final var parts = PART_SEPARATORS.split(lower);
+        final var parts = StringUtils.split(lower, PART_SEPARATORS);
         final var joined = String.join("", parts);
         return BioHandles.SYSTEM_WORDS.contains(lower) || BioHandles.SYSTEM_WORDS.contains(joined)
-                || BioHandles.SERVICE_NAMES.contains(parts[0]) || ACCOUNT_FLOW_WORDS.contains(joined)
+                || parts.length > 0 && BioHandles.SERVICE_NAMES.contains(parts[0]) || ACCOUNT_FLOW_WORDS.contains(joined)
                 || Arrays.stream(parts).anyMatch(ACCOUNT_FLOW_WORDS::contains);
     }
 
