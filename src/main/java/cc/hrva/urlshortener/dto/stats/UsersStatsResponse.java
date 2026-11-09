@@ -14,7 +14,8 @@ public record UsersStatsResponse(
         ApiKeyCounts apiKeys,
         McpCounts mcp,
         BioPageCounts bioPages,
-        NotificationCounts notifications) {
+        NotificationCounts notifications,
+        List<CountEntry> signupSources) {
 
     public record UserInventory(
             long total,

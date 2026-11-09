@@ -77,6 +77,12 @@ public class UsersStatsRepository {
     private static final String COUNT_AUTO_DISABLED_CHANNELS =
             "select count(*) from notification_channel where enabled = false and auto_disabled_at is not null";
 
+    private static final String COUNT_SIGNUP_SOURCES = """
+            select signup_source, count(*) as total from user_account
+            where signup_source is not null and create_date >= :start and create_date < :end
+            group by signup_source
+            """;
+
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
     public AccountCounts countAccounts() {
@@ -118,6 +124,11 @@ public class UsersStatsRepository {
         return jdbcTemplate.queryForObject(COUNT_BIO_PAGES, Map.of(), (row, rowNumber) -> new BioPageCounts(
                 row.getLong("total_pages"),
                 row.getLong("hidden_pages")));
+    }
+
+    public List<CountEntry> countSignupSources(final LocalDateTime start, final LocalDateTime end) {
+        return jdbcTemplate.query(COUNT_SIGNUP_SOURCES, Map.of("start", start, "end", end), (row, rowNumber) ->
+                new CountEntry(row.getString("signup_source"), row.getLong("total")));
     }
 
     public NotificationCounts countNotifications() {

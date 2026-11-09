@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.model.enums.SignupSource;
 import cc.hrva.urlshortener.dto.AdminUserResponse;
 import cc.hrva.urlshortener.dto.DataExportDto;
 import cc.hrva.urlshortener.dto.DeleteAccountDto;
@@ -19,6 +20,7 @@ public interface UserService {
     User getUserFromToken();
     User register(User user);
     UserDto fetchCurrentUser();
+    void answerSignupSource(SignupSource source);
     Page<AdminUserResponse> fetchAllUsers(Pageable pageable, UserSearchDto search);
     void persistUser(User user);
     void deleteUserById(Long id);

@@ -1,5 +1,7 @@
 package cc.hrva.urlshortener.service.impl;
 
+import cc.hrva.urlshortener.exception.SignupSourceAlreadyAnsweredException;
+import cc.hrva.urlshortener.model.enums.SignupSource;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.converter.UserToUserDtoConverter;
 import cc.hrva.urlshortener.converter.UserUpdateDtoToUserConverter;
@@ -80,6 +82,8 @@ public class DefaultUserService implements UserService {
             .byDefault(Sort.by(Sort.Order.desc(CREATE_DATE)))
             .thenBy(Sort.Order.desc("id"));
 
+    private static final int SIGNUP_QUESTION_DAYS = 30;
+
     private final AppProperties appProperties;
     private final Reauthentication reauthentication;
     private final UrlRepository urlRepository;
@@ -138,8 +142,26 @@ public class DefaultUserService implements UserService {
         final var userDto = userToUserDtoConverter.convert(user);
         userDto.setSignInMethods(signInMethodService.methodsOf(user.getId()));
         userDto.setPasswordSet(signInMethodService.passwordSet(user));
+        userDto.setAskSignupSource(user.getSignupSource() == null && isWithinSignupQuestionWindow(user));
 
         return userDto;
+    }
+
+    @Override
+    @Transactional
+    public void answerSignupSource(final SignupSource source) {
+        final var user = Optional.ofNullable(getUserFromToken())
+                .orElseThrow(() -> new NotSignedInException("Not authenticated"));
+        if (user.getSignupSource() != null) {
+            throw new SignupSourceAlreadyAnsweredException();
+        }
+        user.setSignupSource(source);
+        userRepository.save(user);
+        log.info("Sign-up source answered id={} skipped={}", user.getId(), source == SignupSource.SKIPPED);
+    }
+
+    private boolean isWithinSignupQuestionWindow(final User user) {
+        return user.getCreateDate() != null && user.getCreateDate().isAfter(LocalDateTime.now().minusDays(SIGNUP_QUESTION_DAYS));
     }
 
     @Override
@@ -253,6 +275,7 @@ public class DefaultUserService implements UserService {
                 userToUserDtoConverter.convert(user),
                 user.getLastLinkBlockedAt(),
                 user.getDestinationChangeOverride(),
+                user.getSignupSource(),
                 urls,
                 destinationChangeService.exportFor(user),
                 apiKeys,

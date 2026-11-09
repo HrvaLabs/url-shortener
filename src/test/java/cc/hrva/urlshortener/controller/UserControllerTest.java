@@ -13,6 +13,9 @@ import cc.hrva.urlshortener.dto.UserDto;
 import cc.hrva.urlshortener.dto.UserSearchDto;
 import cc.hrva.urlshortener.dto.UserUpdateDto;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.NotSignedInException;
+import cc.hrva.urlshortener.exception.SignupSourceAlreadyAnsweredException;
+import cc.hrva.urlshortener.model.enums.SignupSource;
 import cc.hrva.urlshortener.exception.ReauthenticationRequiredException;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.SignInMethod;
@@ -99,6 +102,50 @@ class UserControllerTest {
         mockMvc.perform(get("/api/v1/users/me"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.passwordSet").doesNotExist());
+    }
+
+    @Test
+    void theCurrentUserSaysWhetherToAskHowTheyFoundTheSite() throws Exception {
+        when(userService.fetchCurrentUser()).thenReturn(UserDto.builder().id(1L).email("test@example.com").askSignupSource(true).build());
+
+        mockMvc.perform(get("/api/v1/users/me"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.askSignupSource").value(true));
+    }
+
+    @Test
+    void anAnswerIsStoredAndAnswers204() throws Exception {
+        mockMvc.perform(put("/api/v1/users/me/signup-source").contentType(MediaType.APPLICATION_JSON).content("{\"source\":\"AI_ASSISTANT\"}"))
+                .andExpect(status().isNoContent());
+
+        verify(userService).answerSignupSource(SignupSource.AI_ASSISTANT);
+    }
+
+    @Test
+    void aSecondAnswerIs409() throws Exception {
+        doThrow(new SignupSourceAlreadyAnsweredException()).when(userService).answerSignupSource(SignupSource.OTHER);
+
+        mockMvc.perform(put("/api/v1/users/me/signup-source").contentType(MediaType.APPLICATION_JSON).content("{\"source\":\"OTHER\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail").value("Already answered."));
+    }
+
+    @Test
+    void anUnknownAnswerIs400() throws Exception {
+        mockMvc.perform(put("/api/v1/users/me/signup-source").contentType(MediaType.APPLICATION_JSON).content("{\"source\":\"TELEPATHY\"}"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(put("/api/v1/users/me/signup-source").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(userService);
+    }
+
+    @Test
+    void aSignedOutCallerIs401() throws Exception {
+        doThrow(new NotSignedInException("Not authenticated")).when(userService).answerSignupSource(SignupSource.OTHER);
+
+        mockMvc.perform(put("/api/v1/users/me/signup-source").contentType(MediaType.APPLICATION_JSON).content("{\"source\":\"OTHER\"}"))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
@@ -206,6 +253,7 @@ class UserControllerTest {
                 UserDto.builder().id(1L).email("test@example.com").build(),
                 null,
                 cc.hrva.urlshortener.model.enums.DestinationChangeOverride.AUTOMATIC,
+                cc.hrva.urlshortener.model.enums.SignupSource.RECOMMENDED,
                 java.util.Collections.emptyList(),
                 java.util.Collections.emptyList(),
                 java.util.Collections.emptyList(),
@@ -224,6 +272,7 @@ class UserControllerTest {
                 .andExpect(jsonPath("$.profile.email").value("test@example.com"))
                 .andExpect(jsonPath("$.passkeys").isEmpty())
                 .andExpect(jsonPath("$.recoveryCodesRemaining").value(3))
+                .andExpect(jsonPath("$.signupSource").value("RECOMMENDED"))
                 .andExpect(jsonPath("$.bioPage").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.notifications.consentHistory").isEmpty())
                 .andExpect(jsonPath("$.notifications.channels").isEmpty())

@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.audit.Audited;
 import cc.hrva.urlshortener.dto.AdminUserResponse;
 import cc.hrva.urlshortener.dto.DataExportDto;
 import cc.hrva.urlshortener.dto.DeleteAccountDto;
+import cc.hrva.urlshortener.dto.SignupSourceDto;
 import cc.hrva.urlshortener.dto.UpdatePasswordDto;
 import cc.hrva.urlshortener.dto.UserDto;
 import cc.hrva.urlshortener.dto.UserSearchDto;
@@ -44,6 +45,18 @@ public class UserController {
     @GetMapping("/me")
     public ResponseEntity<UserDto> currentUser() {
         return ResponseEntity.ok(userService.fetchCurrentUser());
+    }
+
+    @Operation(summary = "Answer how you found hrva.cc", description = "Store the one-time answer to \"How did you find hrva.cc?\". Send SKIPPED when the question is dismissed. The first answer stays.")
+    @ApiResponse(responseCode = "204", description = "Answer stored")
+    @ApiResponse(responseCode = "400", description = "Unknown or missing source")
+    @ApiResponse(responseCode = "409", description = "Already answered")
+    @PutMapping("/me/signup-source")
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_USER')")
+    public ResponseEntity<Void> answerSignupSource(@Valid @RequestBody final SignupSourceDto signupSourceDto) {
+        userService.answerSignupSource(signupSourceDto.getSource());
+
+        return ResponseEntity.noContent().build();
     }
 
     @Hidden

@@ -603,7 +603,7 @@ class DefaultWeeklyDigestServiceTest {
 
     private static UsersStatsResponse users(final LocalDate from, final LocalDate to, final StackedSeries signups, final long activeLast7Days) {
         return new UsersStatsResponse(7, from, to, signups, new UserInventory(80, 78, 2, 1, 70, 10, List.of()), activeLast7Days, 40,
-                new ApiKeyCounts(0, 0, 0, 0), new McpCounts(0, 0), new BioPageCounts(0, 0), null);
+                new ApiKeyCounts(0, 0, 0, 0), new McpCounts(0, 0), new BioPageCounts(0, 0), null, List.of());
     }
 
     private static SafetyStatsResponse safety(final StackedSeries reviewsOpened, final List<CountEntry> resolved,

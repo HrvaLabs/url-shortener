@@ -17,6 +17,7 @@ import cc.hrva.urlshortener.model.enums.DomainRequestStatus;
 import cc.hrva.urlshortener.model.enums.LastDeliveryStatus;
 import cc.hrva.urlshortener.model.enums.NotificationType;
 import cc.hrva.urlshortener.model.enums.PasskeyKind;
+import cc.hrva.urlshortener.model.enums.SignupSource;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -25,6 +26,7 @@ public record DataExportDto(
         UserDto profile,
         LocalDateTime lastLinkBlockedAt,
         DestinationChangeOverride destinationChangeOverride,
+        SignupSource signupSource,
         List<UrlResponse> urls,
         List<DestinationChangeExport> destinationChanges,
         List<ApiKeyResponse> apiKeys,

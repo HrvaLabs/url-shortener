@@ -56,6 +56,18 @@ class UsersStatsRepositoryTest {
     }
 
     @Test
+    void countsSignupSourcesOfAccountsCreatedInsideTheWindowOnly() {
+        answeredAccount(9801, "AI_ASSISTANT", NOW.minusDays(2));
+        answeredAccount(9802, "AI_ASSISTANT", NOW.minusDays(1));
+        answeredAccount(9803, "AI_ASSISTANT", NOW.minusDays(20));
+        answeredAccount(9804, "SKIPPED", NOW.minusDays(3));
+        answeredAccount(9805, null, NOW.minusDays(3));
+
+        assertThat(usersStatsRepository.countSignupSources(NOW.minusDays(7), NOW))
+                .containsExactlyInAnyOrder(new CountEntry("AI_ASSISTANT", 2), new CountEntry("SKIPPED", 1));
+    }
+
+    @Test
     void countsAdminsOnce() {
         accountWithDefaults(9301);
         accountWithDefaults(9302);
@@ -224,6 +236,11 @@ class UsersStatsRepositoryTest {
         jdbcTemplate.update("insert into user_account (id, email, password, active, email_verified, two_factor_enabled) "
                         + "values (?, ?, ?, ?, ?, ?)",
                 id, email(id), "correct horse battery", active, emailVerified, twoFactorEnabled);
+    }
+
+    private void answeredAccount(final long id, final String signupSource, final LocalDateTime createDate) {
+        jdbcTemplate.update("insert into user_account (id, email, password, signup_source, create_date) values (?, ?, ?, ?, ?)",
+                id, email(id), "correct horse battery", signupSource, createDate);
     }
 
     private void accountWithDefaults(final long id) {

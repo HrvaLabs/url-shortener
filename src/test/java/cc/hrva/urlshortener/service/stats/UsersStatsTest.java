@@ -63,6 +63,23 @@ class UsersStatsTest {
     }
 
     @Test
+    void signupSourcesListEveryAnswerInEnumOrderWithZeroForTheUnanswered() {
+        givenCounts(NO_ACCOUNTS, STORED_NOW, NO_API_KEYS, NO_MCP, NO_BIO_PAGES);
+        when(usersStatsRepository.countSignupSources(WINDOW.start(), WINDOW.end())).thenReturn(List.of(
+                new CountEntry("SKIPPED", 1),
+                new CountEntry("AI_ASSISTANT", 2)));
+
+        assertThat(usersStats.collect(WINDOW).signupSources()).containsExactly(
+                new CountEntry("AI_ASSISTANT", 2),
+                new CountEntry("SEARCH_ENGINE", 0),
+                new CountEntry("SHARED_LINK", 0),
+                new CountEntry("RECOMMENDED", 0),
+                new CountEntry("WEBSITE_OR_LIST", 0),
+                new CountEntry("OTHER", 0),
+                new CountEntry("SKIPPED", 1));
+    }
+
+    @Test
     void deactivatedIsTotalMinusActive() {
         givenCounts(new AccountCounts(120, 110, 100, 8), STORED_NOW, NO_API_KEYS, NO_MCP, NO_BIO_PAGES);
         when(usersStatsRepository.countAdmins()).thenReturn(1L);

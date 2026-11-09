@@ -109,6 +109,9 @@ import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import cc.hrva.urlshortener.exception.NotSignedInException;
+import cc.hrva.urlshortener.exception.SignupSourceAlreadyAnsweredException;
+import cc.hrva.urlshortener.model.enums.SignupSource;
 import cc.hrva.urlshortener.service.inactivity.InactiveAccounts;
 import cc.hrva.urlshortener.service.ratelimit.AccountEmailLimits;
 import org.mockito.ArgumentCaptor;
@@ -346,6 +349,79 @@ class DefaultUserServiceTest {
 
         assertThat(result.getEmail()).isEqualTo("test@example.com");
         SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void aNewAccountIsAsked() {
+        signedInAs(User.builder().id(1L).email("test@example.com").createDate(LocalDateTime.now().minusDays(2)).build());
+
+        assertThat(userService.fetchCurrentUser().getAskSignupSource()).isTrue();
+    }
+
+    @Test
+    void anAccountOlderThan30DaysIsNotAsked() {
+        signedInAs(User.builder().id(1L).email("test@example.com").createDate(LocalDateTime.now().minusDays(31)).build());
+
+        assertThat(userService.fetchCurrentUser().getAskSignupSource()).isFalse();
+    }
+
+    @Test
+    void anAnsweredAccountIsNotAsked() {
+        signedInAs(User.builder().id(1L).email("test@example.com").createDate(LocalDateTime.now().minusDays(2))
+                .signupSource(SignupSource.RECOMMENDED).build());
+
+        assertThat(userService.fetchCurrentUser().getAskSignupSource()).isFalse();
+    }
+
+    @Test
+    void aSkippedAccountIsNotAsked() {
+        signedInAs(User.builder().id(1L).email("test@example.com").createDate(LocalDateTime.now().minusDays(2))
+                .signupSource(SignupSource.SKIPPED).build());
+
+        assertThat(userService.fetchCurrentUser().getAskSignupSource()).isFalse();
+    }
+
+    @Test
+    void theFirstAnswerIsStored() {
+        final var user = User.builder().id(1L).email("test@example.com").build();
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken("test@example.com", null));
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+
+        userService.answerSignupSource(SignupSource.AI_ASSISTANT);
+
+        assertThat(user.getSignupSource()).isEqualTo(SignupSource.AI_ASSISTANT);
+        verify(userRepository).save(user);
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void aSecondAnswerIsRefusedAndKeepsTheFirst() {
+        final var user = User.builder().id(1L).email("test@example.com").signupSource(SignupSource.SEARCH_ENGINE).build();
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken("test@example.com", null));
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> userService.answerSignupSource(SignupSource.OTHER))
+                .isInstanceOf(SignupSourceAlreadyAnsweredException.class)
+                .hasMessage("Already answered.");
+
+        assertThat(user.getSignupSource()).isEqualTo(SignupSource.SEARCH_ENGINE);
+        verify(userRepository, never()).save(any());
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void anAnswerFromNobodyIsRefused() {
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken("ghost@example.com", null));
+        when(userRepository.findByEmail("ghost@example.com")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.answerSignupSource(SignupSource.OTHER)).isInstanceOf(NotSignedInException.class);
+        SecurityContextHolder.clearContext();
+    }
+
+    private void signedInAs(final User user) {
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(user.getEmail(), null));
+        when(userRepository.findByEmail(user.getEmail())).thenReturn(Optional.of(user));
+        when(userToUserDtoConverter.convert(user)).thenReturn(UserDto.builder().id(user.getId()).email(user.getEmail()).build());
     }
 
     @Test
@@ -1106,7 +1182,7 @@ class DefaultUserServiceTest {
     @Test
     void theDomainsAndTheirLimitRequestsComeLastInTheExport() {
         assertThat(Arrays.stream(DataExportDto.class.getRecordComponents()).map(RecordComponent::getName))
-                .containsExactly("exportedAt", "profile", "lastLinkBlockedAt", "destinationChangeOverride", "urls", "destinationChanges", "apiKeys",
+                .containsExactly("exportedAt", "profile", "lastLinkBlockedAt", "destinationChangeOverride", "signupSource", "urls", "destinationChanges", "apiKeys",
                         "emails", "passkeys", "signInMethods", "recoveryCodesRemaining", "bioPage", "notifications", "domains", "domainRequests");
         assertThat(Arrays.stream(DestinationChangeExport.class.getRecordComponents()).map(RecordComponent::getName))
                 .containsExactly("shortUrl", "domain", "oldLongUrl", "newLongUrl", "via", "forced", "changedAt");

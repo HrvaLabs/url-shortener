@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.model;
 
+import cc.hrva.urlshortener.model.enums.SignupSource;
 import cc.hrva.urlshortener.model.enums.DestinationChangeOverride;
 
 import cc.hrva.urlshortener.model.codebook.Authorities;
@@ -94,6 +95,11 @@ public class User {
     @JsonIgnore
     @Enumerated(EnumType.STRING)
     private DestinationChangeOverride destinationChangeOverride;
+
+    @JsonIgnore
+    @Enumerated(EnumType.STRING)
+    @Column(length = 32)
+    private SignupSource signupSource;
 
     @PrePersist
     public void onCreate() {

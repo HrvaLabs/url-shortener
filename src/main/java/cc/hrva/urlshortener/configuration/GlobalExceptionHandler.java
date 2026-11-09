@@ -45,6 +45,7 @@ import cc.hrva.urlshortener.exception.SignInUnavailableException;
 import cc.hrva.urlshortener.exception.TwoStepFailedException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.NotSignedInException;
+import cc.hrva.urlshortener.exception.SignupSourceAlreadyAnsweredException;
 import cc.hrva.urlshortener.security.AccessAnswers;
 import cc.hrva.urlshortener.exception.NotificationChannelNotFoundException;
 import cc.hrva.urlshortener.exception.NotificationTestUnavailableException;
@@ -236,6 +237,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BioHandleUnavailableException.class)
     public ResponseEntity<ProblemDetail> handleBioHandleUnavailable(final BioHandleUnavailableException ex) {
+        return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
+    }
+
+    @ExceptionHandler(SignupSourceAlreadyAnsweredException.class)
+    public ResponseEntity<ProblemDetail> handleSignupSourceAlreadyAnswered(final SignupSourceAlreadyAnsweredException ex) {
         return ProblemResponses.entity(HttpStatus.CONFLICT, safeMessage(ex));
     }
 

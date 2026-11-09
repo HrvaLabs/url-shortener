@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="056-user-account-signup-source">
+        <addColumn tableName="user_account">
+            <column name="signup_source" type="VARCHAR(32)"/>
+        </addColumn>
+        <rollback>
+            <dropColumn tableName="user_account" columnName="signup_source"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

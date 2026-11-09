@@ -1,11 +1,15 @@
 package cc.hrva.urlshortener.service.stats;
 
+import cc.hrva.urlshortener.dto.stats.CountEntry;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse;
+import cc.hrva.urlshortener.model.enums.SignupSource;
 import cc.hrva.urlshortener.dto.stats.UsersStatsResponse.UserInventory;
 import cc.hrva.urlshortener.repository.stats.HourlyCountRepository;
 import cc.hrva.urlshortener.repository.stats.HourlySeries;
 import cc.hrva.urlshortener.repository.stats.UsersStatsRepository;
+import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -45,7 +49,17 @@ public class UsersStats {
                 usersStatsRepository.countApiKeys(now.toLocalDate()),
                 usersStatsRepository.countMcp(now),
                 usersStatsRepository.countBioPages(),
-                usersStatsRepository.countNotifications());
+                usersStatsRepository.countNotifications(),
+                signupSources(window));
+    }
+
+    private List<CountEntry> signupSources(final StatsWindow window) {
+        final var counts = usersStatsRepository.countSignupSources(window.start(), window.end()).stream()
+                .collect(Collectors.toMap(CountEntry::value, CountEntry::count));
+
+        return Arrays.stream(SignupSource.values())
+                .map(source -> new CountEntry(source.name(), counts.getOrDefault(source.name(), 0L)))
+                .toList();
     }
 
 }
