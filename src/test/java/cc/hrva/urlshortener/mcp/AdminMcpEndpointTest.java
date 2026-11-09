@@ -50,6 +50,8 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -326,6 +328,33 @@ class AdminMcpEndpointTest {
     void adminEndpointRefusesAnInactiveAdminWith403() throws Exception {
         signedIn(User.builder().id(1L).email(ADMIN_EMAIL).active(false).twoStepEnabled(true).build());
         final var token = accessTokens.issue(ADMIN_EMAIL, ADMIN_RESOURCE);
+
+        mockMvc.perform(mcpRequest("/mcp/admin", BLOCK_DOMAIN_CALL).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(moderationService, urlRepository);
+    }
+
+    @Test
+    void adminEndpointAnswers503WhenTheDatabaseIsDown(final CapturedOutput output) throws Exception {
+        final var token = accessTokens.issue(ADMIN_EMAIL, ADMIN_RESOURCE);
+        when(userRepository.findByEmail(ADMIN_EMAIL)).thenThrow(new DataAccessResourceFailureException("connection refused"));
+
+        mockMvc.perform(mcpRequest("/mcp/admin", BLOCK_DOMAIN_CALL).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, "60"))
+                .andExpect(jsonPath("$.outage").value("database"))
+                .andExpect(jsonPath("$.detail").value("hrva.cc can't reach its database right now. Try again in a minute."));
+
+        assertThat(output.toString()).contains("MCP admin endpoint refused, the database isn't answering exception=")
+                .doesNotContain(ADMIN_EMAIL);
+        verifyNoInteractions(moderationService, urlRepository);
+    }
+
+    @Test
+    void adminEndpointRefusesWith403WhenTheAccountCantBeRead() throws Exception {
+        final var token = accessTokens.issue(ADMIN_EMAIL, ADMIN_RESOURCE);
+        when(userRepository.findByEmail(ADMIN_EMAIL)).thenThrow(new InvalidDataAccessApiUsageException("bad state"));
 
         mockMvc.perform(mcpRequest("/mcp/admin", BLOCK_DOMAIN_CALL).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isForbidden());

@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.mcp;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.mcp.admin.AdminMcpAuthorizationManager;
+import cc.hrva.urlshortener.mcp.admin.AdminMcpOutageFilter;
 import cc.hrva.urlshortener.mcp.admin.AdminMcpServerConfiguration;
 import cc.hrva.urlshortener.mcp.authorization.StillAuthorizedValidator;
 import cc.hrva.urlshortener.repository.UserRepository;
@@ -28,6 +29,7 @@ import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthen
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 
 @Configuration
 @RequiredArgsConstructor
@@ -51,7 +53,9 @@ public class McpResourceServerConfiguration {
         http.securityMatcher(AdminMcpServerConfiguration.ENDPOINT, PROTECTED_RESOURCE_METADATA + AdminMcpServerConfiguration.ENDPOINT)
                 .authorizeHttpRequests(authorize -> authorize.anyRequest().access(new AdminMcpAuthorizationManager(userRepository)));
 
-        return protectedResource(http, AdminMcpServerConfiguration.ENDPOINT, ADMIN_RESOURCE_NAME, mcpJwtDecoder, authorizationService).build();
+        return protectedResource(http, AdminMcpServerConfiguration.ENDPOINT, ADMIN_RESOURCE_NAME, mcpJwtDecoder, authorizationService)
+                .addFilterBefore(new AdminMcpOutageFilter(), AuthorizationFilter.class)
+                .build();
     }
 
     @Bean

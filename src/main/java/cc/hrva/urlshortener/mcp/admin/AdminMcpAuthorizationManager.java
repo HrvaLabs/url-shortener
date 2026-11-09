@@ -1,9 +1,11 @@
 package cc.hrva.urlshortener.mcp.admin;
 
 import cc.hrva.urlshortener.repository.UserRepository;
+import cc.hrva.urlshortener.util.DatabaseOutages;
 import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.security.authorization.AuthorizationDecision;
 import org.springframework.security.authorization.AuthorizationManager;
 import org.springframework.security.authorization.AuthorizationResult;
@@ -27,6 +29,18 @@ public class AdminMcpAuthorizationManager implements AuthorizationManager<Reques
             return REFUSED;
         }
 
+        try {
+            return decide(token);
+        } catch (final DataAccessException exception) {
+            if (DatabaseOutages.isOutage(exception)) {
+                throw exception;
+            }
+            log.warn("MCP admin endpoint refused, the account couldn't be read exception={}", exception.getClass().getName());
+            return REFUSED;
+        }
+    }
+
+    private AuthorizationResult decide(final JwtAuthenticationToken token) {
         final var user = userRepository.findByEmail(token.getToken().getSubject())
                 .filter(candidate -> !Boolean.FALSE.equals(candidate.getActive()))
                 .orElse(null);
