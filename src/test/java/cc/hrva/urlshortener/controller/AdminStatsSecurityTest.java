@@ -142,7 +142,7 @@ class AdminStatsSecurityTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"traffic", "links", "users", "safety", "system"})
+    @ValueSource(strings = {"traffic", "links", "users", "safety", "system", "visits"})
     void anAdminGetsTheTab(final String tab) throws Exception {
         respond(tab);
 
@@ -217,7 +217,7 @@ class AdminStatsSecurityTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"traffic", "links", "users", "safety", "system"})
+    @ValueSource(strings = {"traffic", "links", "users", "safety", "system", "visits"})
     void aSignedInUserWhoIsNotAnAdminIsForbidden(final String tab) throws Exception {
         mockMvc.perform(tabRequest(tab, "user-token").param("days", "7"))
                 .andExpect(status().isForbidden());
@@ -226,7 +226,7 @@ class AdminStatsSecurityTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"traffic", "links", "users", "safety", "system"})
+    @ValueSource(strings = {"traffic", "links", "users", "safety", "system", "visits"})
     void nobodySignedInIsUnauthorized(final String tab) throws Exception {
         mockMvc.perform(get(STATS + tab).param("days", "7"))
                 .andExpect(status().isUnauthorized());
@@ -235,7 +235,7 @@ class AdminStatsSecurityTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"traffic", "links", "users", "safety", "system"})
+    @ValueSource(strings = {"traffic", "links", "users", "safety", "system", "visits"})
     void anUnsupportedRangeIsABadRequest(final String tab) throws Exception {
         refuseRange(tab);
 
@@ -245,7 +245,7 @@ class AdminStatsSecurityTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"traffic", "links", "users", "safety", "system"})
+    @ValueSource(strings = {"traffic", "links", "users", "safety", "system", "visits"})
     void aMistypedRangeIsABadRequest(final String tab) throws Exception {
         mockMvc.perform(tabRequest(tab, "admin-token").param("days", "abc"))
                 .andExpect(status().isBadRequest())
@@ -272,6 +272,8 @@ class AdminStatsSecurityTest {
                     LocalDate.of(2026, 10, 26), "2.9", LocalDateTime.of(2026, 10, 26, 8, 0), "1m", "25", List.of(), 0, 0, List.of(),
                     new RequestCounts(0, 0), CacheStats.of(0, 0), new ComponentHealth("UP", "UP"), new RedisStats(null, null, null),
                     new DatabaseStats("H2", "2.5.252", null, true), new StackedSeries(List.of(), List.of()), null));
+            case "visits" -> when(adminStatsService.visits(7)).thenReturn(new VisitStatsResponse(true, 7, 7, LocalDate.of(2026, 10, 20),
+                    LocalDate.of(2026, 10, 26), 0, List.of(), List.of()));
             default -> throw new IllegalArgumentException("No response for the " + tab + " tab");
         }
     }
@@ -284,6 +286,7 @@ class AdminStatsSecurityTest {
             case "users" -> when(adminStatsService.users(14)).thenThrow(refusal);
             case "safety" -> when(adminStatsService.safety(14)).thenThrow(refusal);
             case "system" -> when(adminStatsService.system(14)).thenThrow(refusal);
+            case "visits" -> when(adminStatsService.visits(14)).thenThrow(refusal);
             default -> throw new IllegalArgumentException("No refusal for the " + tab + " tab");
         }
     }

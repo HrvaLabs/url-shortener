@@ -122,7 +122,8 @@ class OpenAiAppsChallengeControllerTest {
         when(settingsService.text(SettingKey.OPENAI_APPS_CHALLENGE)).thenReturn(blank);
 
         mockMvc.perform(get(CHALLENGE))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isNotFound())
+                .andExpect(header().string("Cache-Control", "no-store"));
     }
 
     @Test

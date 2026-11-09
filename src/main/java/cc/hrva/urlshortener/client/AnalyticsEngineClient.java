@@ -125,7 +125,8 @@ public class AnalyticsEngineClient {
     }
 
     private static AnalyticsEngineException failed(final String message, final Throwable cause) {
-        log.warn("Analytics Engine call failed failure={} exception={}", message, cause.getClass().getName());
+        final var reported = cause instanceof ExecutionException && cause.getCause() != null ? cause.getCause() : cause;
+        log.warn("Analytics Engine call failed failure={} exception={}", message, reported.getClass().getName());
         return new AnalyticsEngineException(message);
     }
 

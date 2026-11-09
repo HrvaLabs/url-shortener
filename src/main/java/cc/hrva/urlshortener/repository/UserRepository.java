@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.SignupSource;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -41,6 +42,11 @@ public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificat
     @Transactional
     @Query("update User u set u.webauthnUserHandle = :handle where u.id = :id and u.webauthnUserHandle is null")
     int setWebauthnUserHandleIfMissing(@Param("id") Long id, @Param("handle") String handle);
+
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Transactional
+    @Query("update User u set u.signupSource = :source where u.id = :id and u.signupSource is null")
+    int answerSignupSourceIfUnanswered(@Param("id") Long id, @Param("source") SignupSource source);
 
     @Modifying(flushAutomatically = true)
     @Transactional

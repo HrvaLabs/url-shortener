@@ -141,7 +141,7 @@ class UserControllerTest {
     }
 
     @Test
-    void aSignedOutCallerIs401() throws Exception {
+    void aNotSignedInAnswerIs401() throws Exception {
         doThrow(new NotSignedInException("Not authenticated")).when(userService).answerSignupSource(SignupSource.OTHER);
 
         mockMvc.perform(put("/api/v1/users/me/signup-source").contentType(MediaType.APPLICATION_JSON).content("{\"source\":\"OTHER\"}"))

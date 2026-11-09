@@ -60,6 +60,21 @@ class SignupSourceSchemaTest {
                 .isEqualTo("WEBSITE_OR_LIST");
     }
 
+    @Test
+    void theConditionalAnswerChangesOneRowOnlyWhileUnanswered() {
+        final var user = User.builder().email("race@example.com").password("correct horse battery").apiKeySlots(4L).build();
+        entityManager.persist(user);
+        entityManager.flush();
+        final var update = "update User u set u.signupSource = :source where u.id = :id and u.signupSource is null";
+
+        final var first = entityManager.createQuery(update).setParameter("source", SignupSource.OTHER).setParameter("id", user.getId()).executeUpdate();
+        final var second = entityManager.createQuery(update).setParameter("source", SignupSource.SEARCH_ENGINE).setParameter("id", user.getId()).executeUpdate();
+
+        assertThat(first).isEqualTo(1);
+        assertThat(second).isZero();
+        assertThat(jdbcTemplate.queryForObject("select signup_source from user_account where id = ?", String.class, user.getId())).isEqualTo("OTHER");
+    }
+
     @SpringBootConfiguration
     @EnableAutoConfiguration
     @EntityScan(basePackageClasses = User.class)

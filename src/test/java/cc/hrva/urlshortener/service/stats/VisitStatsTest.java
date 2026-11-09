@@ -146,6 +146,15 @@ class VisitStatsTest {
     }
 
     @Test
+    void aCountThatIsNotANumberIs503() {
+        when(client.query(anyString())).thenReturn(List.of(java.util.Map.of("source", "x", "kind", "utm", "visits", "many")));
+
+        assertThatThrownBy(() -> visitStats.collect(AnalyticsRange.LAST_30_DAYS))
+                .isInstanceOf(FeatureUnavailableException.class)
+                .hasMessage(UNAVAILABLE);
+    }
+
+    @Test
     void aFailureIsNotCached() {
         when(client.query(anyString())).thenThrow(new AnalyticsEngineException("Analytics Engine answered 500"));
 

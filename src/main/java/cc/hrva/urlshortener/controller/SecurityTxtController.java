@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class SecurityTxtController {
 
     private static final Duration VALIDITY = Duration.ofDays(365);
-    private static final MediaType TEXT_PLAIN_UTF_8 = MediaType.parseMediaType("text/plain; charset=utf-8");
+    static final MediaType TEXT_PLAIN_UTF_8 = MediaType.parseMediaType("text/plain; charset=utf-8");
     private static final String SECURITY_TXT = """
             Contact: mailto:abuse@hrva.cc
             Expires: %s

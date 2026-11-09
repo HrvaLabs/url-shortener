@@ -386,25 +386,26 @@ class DefaultUserServiceTest {
         final var user = User.builder().id(1L).email("test@example.com").build();
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken("test@example.com", null));
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.answerSignupSourceIfUnanswered(1L, SignupSource.AI_ASSISTANT)).thenReturn(1);
 
         userService.answerSignupSource(SignupSource.AI_ASSISTANT);
 
-        assertThat(user.getSignupSource()).isEqualTo(SignupSource.AI_ASSISTANT);
-        verify(userRepository).save(user);
+        verify(userRepository).answerSignupSourceIfUnanswered(1L, SignupSource.AI_ASSISTANT);
+        verify(userRepository, never()).save(any());
         SecurityContextHolder.clearContext();
     }
 
     @Test
-    void aSecondAnswerIsRefusedAndKeepsTheFirst() {
-        final var user = User.builder().id(1L).email("test@example.com").signupSource(SignupSource.SEARCH_ENGINE).build();
+    void aSecondAnswerIsRefusedWhenTheConditionalUpdateChangesNothing() {
+        final var user = User.builder().id(1L).email("test@example.com").build();
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken("test@example.com", null));
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.answerSignupSourceIfUnanswered(1L, SignupSource.OTHER)).thenReturn(0);
 
         assertThatThrownBy(() -> userService.answerSignupSource(SignupSource.OTHER))
                 .isInstanceOf(SignupSourceAlreadyAnsweredException.class)
                 .hasMessage("Already answered.");
 
-        assertThat(user.getSignupSource()).isEqualTo(SignupSource.SEARCH_ENGINE);
         verify(userRepository, never()).save(any());
         SecurityContextHolder.clearContext();
     }

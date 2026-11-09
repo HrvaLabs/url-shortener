@@ -18,6 +18,7 @@ import cc.hrva.urlshortener.service.stats.VisitStats;
 import java.time.LocalDate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -64,6 +65,7 @@ public class DefaultAdminStatsService implements AdminStatsService {
     }
 
     @Override
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public VisitStatsResponse visits(final Integer days) {
         return visitStats.collect(AnalyticsRange.fromDays(days));
     }

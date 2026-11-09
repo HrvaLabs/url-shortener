@@ -150,11 +150,9 @@ public class DefaultUserService implements UserService {
     public void answerSignupSource(final SignupSource source) {
         final var user = Optional.ofNullable(getUserFromToken())
                 .orElseThrow(() -> new NotSignedInException("Not authenticated"));
-        if (user.getSignupSource() != null) {
+        if (userRepository.answerSignupSourceIfUnanswered(user.getId(), source) == 0) {
             throw new SignupSourceAlreadyAnsweredException();
         }
-        user.setSignupSource(source);
-        userRepository.save(user);
         log.info("Sign-up source answered id={} skipped={}", user.getId(), source == SignupSource.SKIPPED);
     }
 

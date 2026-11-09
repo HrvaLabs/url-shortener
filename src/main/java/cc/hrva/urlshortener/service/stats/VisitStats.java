@@ -65,13 +65,13 @@ public class VisitStats {
         }
         try {
             final var sources = client.query(SOURCES_SQL.formatted(dataset, window.days())).stream()
-                    .map(row -> new VisitStatsResponse.Source(text(row.get("source")), text(row.get("kind")), count(row.get("visits"))))
+                    .map(row -> new VisitStatsResponse.Source(text(row.get("source")), text(row.get("kind")), count("visits", row.get("visits"))))
                     .toList();
             final var pages = client.query(PAGES_SQL.formatted(dataset, window.days())).stream()
-                    .map(row -> new VisitStatsResponse.Page(text(row.get("page")), count(row.get("visits"))))
+                    .map(row -> new VisitStatsResponse.Page(text(row.get("page")), count("visits", row.get("visits"))))
                     .toList();
             final var totals = client.query(TOTAL_SQL.formatted(dataset, window.days()));
-            final var total = totals.isEmpty() ? 0 : count(totals.getFirst().get("visits"));
+            final var total = totals.isEmpty() ? 0 : count("visits", totals.getFirst().get("visits"));
             return new VisitStatsResponse(true, window.days(), requestedDays, window.from(), window.to(), total, sources, pages);
         } catch (final AnalyticsEngineException exception) {
             throw new FeatureUnavailableException(UNAVAILABLE);
@@ -82,7 +82,7 @@ public class VisitStats {
         return value == null ? "" : value.toString();
     }
 
-    private static long count(final Object value) {
+    private static long count(final String field, final Object value) {
         if (value instanceof Number number) {
             return Math.round(number.doubleValue());
         }
@@ -92,6 +92,7 @@ public class VisitStats {
         try {
             return Math.round(Double.parseDouble(value.toString().strip()));
         } catch (final NumberFormatException exception) {
+            log.warn("Visit count not a number field={}", field);
             throw new AnalyticsEngineException("Analytics Engine returned a count that is not a number");
         }
     }

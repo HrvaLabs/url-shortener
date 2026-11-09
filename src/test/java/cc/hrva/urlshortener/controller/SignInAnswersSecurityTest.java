@@ -46,6 +46,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import static org.mockito.Mockito.lenient;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -112,6 +113,13 @@ class SignInAnswersSecurityTest {
                 .andExpect(jsonPath("$.status").value(401))
                 .andExpect(jsonPath("$.detail").value("Sign in to continue."))
                 .andExpect(jsonPath("$.instance").value("/api/v1/users/probe"));
+    }
+
+    @Test
+    void nobodySignedInAnsweringTheSignupSourceIs401() throws Exception {
+        mockMvc.perform(put("/api/v1/users/me/signup-source").contentType("application/json").content("{\"source\":\"OTHER\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(content().contentType(PROBLEM_JSON));
     }
 
     @Test
