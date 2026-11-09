@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet author="khrvacic" id="055-url-lower-short-url-index" dbms="postgresql">
+        <sql>CREATE INDEX ix_url_domain_lower_short_url ON url (domain_id, lower(short_url))</sql>
+        <rollback>
+            <sql>DROP INDEX ix_url_domain_lower_short_url</sql>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

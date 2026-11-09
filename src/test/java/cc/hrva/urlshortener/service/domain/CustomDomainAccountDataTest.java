@@ -30,6 +30,9 @@ import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.repository.VerificationTokenRepository;
 import cc.hrva.urlshortener.security.Reauthentication;
 import cc.hrva.urlshortener.service.ReservedAliasService;
+import cc.hrva.urlshortener.service.SuspiciousUrlService;
+import cc.hrva.urlshortener.service.SettingsService;
+import cc.hrva.urlshortener.service.alias.AliasRules;
 import cc.hrva.urlshortener.service.ResetTokenService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SignInMethodChangeService;
@@ -185,6 +188,12 @@ class CustomDomainAccountDataTest {
 
     @MockitoBean
     private ReservedAliasService reservedAliasService;
+
+    @MockitoBean
+    private SettingsService settingsService;
+
+    @MockitoBean
+    private SuspiciousUrlService suspiciousUrlService;
 
     @MockitoBean
     private Reauthentication reauthentication;
@@ -774,6 +783,7 @@ class CustomDomainAccountDataTest {
             CustomDomainProvisioner.class,
             CustomDomainHostnames.class,
             CustomDomainRemoval.class,
+            AliasRules.class,
             CustomDomainReconcileRepository.class,
             UrlDomainMoves.class,
             UrlCache.class,

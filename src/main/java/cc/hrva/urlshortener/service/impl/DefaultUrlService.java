@@ -3,6 +3,7 @@ package cc.hrva.urlshortener.service.impl;
 import cc.hrva.urlshortener.controller.LinkUnavailableView;
 import cc.hrva.urlshortener.controller.LinksDownView;
 import cc.hrva.urlshortener.util.ApiDates;
+import cc.hrva.urlshortener.util.BotProbeNames;
 import cc.hrva.urlshortener.exception.RateLimitExceededException;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.controller.LinkWarningView;
@@ -60,6 +61,7 @@ import cc.hrva.urlshortener.service.SignInFormCheckService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
+import cc.hrva.urlshortener.service.alias.AliasRules;
 import cc.hrva.urlshortener.service.burst.CreatedLink;
 import cc.hrva.urlshortener.service.campaign.UrlShapes;
 import cc.hrva.urlshortener.service.domain.CustomDomainHostnames;
@@ -118,7 +120,6 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -175,18 +176,12 @@ public class DefaultUrlService implements UrlService {
     private static final int MAX_GENERATED_ALIAS_ATTEMPTS = 10;
     private static final char[] GENERATED_ALIAS_CHARACTERS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789".toCharArray();
     private static final String NO_FREE_ALIAS = "Couldn't pick a free short URL. Try again.";
-    private static final String CUSTOM_ALIASES_OFF = "Custom aliases are turned off right now.";
     private static final String DOMAIN_FIELD = "domain";
     private static final String DOMAIN_NOT_ACTIVE = "This link's domain isn't active, so the link can't be turned on.";
     private static final String SIGN_IN_CHECK_COULD_NOT_RUN = "the check couldn't run";
 
     private static final Duration DROPPED_QUERY_LOG_INTERVAL = Duration.ofMinutes(10);
     private static final int MAX_DROPPED_QUERY_LOGS = 10_000;
-
-    private static final Set<String> BOT_PROBE_PATHS = Set.of(
-            "favicon.ico", "favicon.png", "robots.txt", "sitemap.xml",
-            ".env", ".git", ".ds_store", "wp-login.php", "wp-admin",
-            "xmlrpc.php", "phpinfo.php", "config.json", ".well-known");
 
     private final UserService userService;
     private final UrlValidator urlValidator;
@@ -225,6 +220,7 @@ public class DefaultUrlService implements UrlService {
     private final LinkInspectionService linkInspectionService;
     private final NewAccounts newAccounts;
     private final ModerationService moderationService;
+    private final AliasRules aliasRules;
     private final Cache<Long, Boolean> droppedQueryLogs = CacheBuilder.newBuilder()
             .expireAfterWrite(DROPPED_QUERY_LOG_INTERVAL)
             .maximumSize(MAX_DROPPED_QUERY_LOGS)
@@ -459,7 +455,7 @@ public class DefaultUrlService implements UrlService {
 
     private UrlResponse saveUrlForUser(final Url url, final User owner, final LinkVerdict verdict) {
         final var customAlias = StringUtils.isNotEmpty(url.getShortUrl());
-        assignShortUrl(url);
+        assignShortUrl(url, AdminTwoStep.hasAdminPowers(owner));
         url.setOwner(owner);
 
         log.info("Saving URL for owner id={} domainId={}", owner.getId(), url.domainId());
@@ -494,16 +490,12 @@ public class DefaultUrlService implements UrlService {
         }
     }
 
-    private void assignShortUrl(final Url url) {
+    private void assignShortUrl(final Url url, final boolean brandExempt) {
         if (StringUtils.isEmpty(url.getShortUrl())) {
             url.setShortUrl(nextFreeShortUrl(url.domainId()));
             log.info("URL got a generated short URL");
         } else {
-            if (url.domainId() == null && !settingsService.isOn(SettingKey.CUSTOM_ALIASES)) {
-                throw new UrlValidationException(CUSTOM_ALIASES_OFF);
-            }
-            urlValidator.checkIfShortUrlIsUnique(url.domainId(), url.getShortUrl());
-            urlValidator.checkIfShortUrlIsReserved(url.getShortUrl());
+            aliasRules.require(url.getShortUrl(), url.domainId(), brandExempt);
         }
     }
 
@@ -525,7 +517,7 @@ public class DefaultUrlService implements UrlService {
     public String nextFreeShortUrl(final Long domainId) {
         return Stream.generate(() -> generateShortUrl(appProperties.getShortUrlLength()))
                 .limit(MAX_GENERATED_ALIAS_ATTEMPTS)
-                .filter(candidate -> !reservedAliasService.isReserved(candidate) && !urlRepository.aliasTaken(domainId, candidate))
+                .filter(candidate -> !reservedAliasService.isReserved(candidate) && !urlRepository.aliasTakenIgnoringCase(domainId, candidate))
                 .findFirst()
                 .orElseThrow(() -> {
                     log.warn("No free short URL among {} generated candidates", MAX_GENERATED_ALIAS_ATTEMPTS);
@@ -1037,7 +1029,7 @@ public class DefaultUrlService implements UrlService {
     }
 
     private static boolean isBotProbe(final String shortUrl) {
-        return shortUrl != null && BOT_PROBE_PATHS.contains(shortUrl.toLowerCase(Locale.ROOT));
+        return BotProbeNames.contains(shortUrl);
     }
 
     private View redirect(final LinkPlace place, final ClickRequest click) {

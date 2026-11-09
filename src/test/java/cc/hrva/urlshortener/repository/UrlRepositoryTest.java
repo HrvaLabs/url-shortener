@@ -2,8 +2,10 @@ package cc.hrva.urlshortener.repository;
 
 import cc.hrva.urlshortener.dto.LinkDestination;
 import cc.hrva.urlshortener.model.Url;
+import cc.hrva.urlshortener.model.CustomDomain;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.model.enums.CustomDomainStatus;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -44,6 +46,24 @@ class UrlRepositoryTest {
 
     @Autowired
     private EntityManager entityManager;
+
+    @Test
+    void aliasTakenIgnoringCaseMatchesAnyCase() {
+        link("Karlo-GitHub", null);
+        final var domain = CustomDomain.builder().hostname("go.example.com").hostnameKey("go.example.com").status(CustomDomainStatus.ACTIVE)
+                .reason("Menu links for my cafe").createdAt(CREATED_AT).updatedAt(CREATED_AT).build();
+        entityManager.persist(domain);
+        final var onDomain = Url.builder().shortUrl("Menu").longUrl("https://menu.example/").domain(domain).build();
+        entityManager.persist(onDomain);
+        entityManager.flush();
+
+        assertThat(urlRepository.aliasTakenIgnoringCase(null, "karlo-github")).isTrue();
+        assertThat(urlRepository.aliasTakenIgnoringCase(null, "KARLO-GITHUB")).isTrue();
+        assertThat(urlRepository.aliasTakenIgnoringCase(null, "menu")).isFalse();
+        assertThat(urlRepository.aliasTakenIgnoringCase(null, "free")).isFalse();
+        assertThat(urlRepository.aliasTakenIgnoringCase(domain.getId(), "MENU")).isTrue();
+        assertThat(urlRepository.aliasTakenIgnoringCase(domain.getId(), "karlo-github")).isFalse();
+    }
 
     @Test
     void onlyActiveLinksPastTheirExpiryAreDueToBeSwitchedOff() {

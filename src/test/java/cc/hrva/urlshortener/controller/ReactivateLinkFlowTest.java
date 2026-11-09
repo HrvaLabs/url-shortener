@@ -44,6 +44,7 @@ import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.QrCodeService;
 import cc.hrva.urlshortener.service.RedirectChainService;
 import cc.hrva.urlshortener.service.ReservedAliasService;
+import cc.hrva.urlshortener.service.alias.AliasRules;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
@@ -347,6 +348,7 @@ class ReactivateLinkFlowTest {
             UrlController.class,
             ShortLinks.class,
             DefaultUrlService.class,
+            AliasRules.class,
             UrlCache.class,
             DestinationCheckRepository.class,
             DefaultUrlValidator.class,

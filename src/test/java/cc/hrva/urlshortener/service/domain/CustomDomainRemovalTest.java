@@ -14,7 +14,10 @@ import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.SendingEmailService;
+import cc.hrva.urlshortener.service.SettingsService;
+import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.UrlService;
+import cc.hrva.urlshortener.service.alias.AliasRules;
 import cc.hrva.urlshortener.service.domain.CustomDomainRemoval.Actor;
 import java.time.Clock;
 import java.time.Instant;
@@ -22,6 +25,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -118,6 +122,12 @@ class CustomDomainRemovalTest {
     private ReservedAliasService reservedAliasService;
 
     @MockitoBean
+    private SuspiciousUrlService suspiciousUrlService;
+
+    @MockitoBean
+    private SettingsService settingsService;
+
+    @MockitoBean
     private CloudflareClient cloudflareClient;
 
     @MockitoBean
@@ -194,6 +204,32 @@ class CustomDomainRemovalTest {
         assertThat(aliasOf(promo)).isEqualTo("r4nd0");
         assertThat(aliasOf(cafe)).isEqualTo("cafe");
         assertThat(jdbcTemplate.queryForObject("select count(*) from url where domain_id is null and short_url = 'menu'", Integer.class)).isOne();
+    }
+
+    @Test
+    void aMovedLinkWithABrandNameGetsARandomAlias() {
+        final var domain = domain("go.example.com", "ACTIVE", "cf-1");
+        final var login = link(domain, "paypal-login", true);
+        final var menu = link(domain, "menu", true);
+        when(suspiciousUrlService.findBrandInHandle("paypal-login")).thenReturn(Optional.of("paypal"));
+
+        final var response = customDomainRemoval.remove(domain, DomainLinkMode.MOVE, OWNER);
+
+        assertThat(response).isEqualTo(new DomainRemovalResponse(2, List.of(new DomainRename("paypal-login", "k3J9x")), 0));
+        assertThat(aliasOf(login)).isEqualTo("k3J9x");
+        assertThat(aliasOf(menu)).isEqualTo("menu");
+    }
+
+    @Test
+    void aMovedLinkWhoseNameIsTakenByCaseGetsARandomAlias() {
+        final var domain = domain("go.example.com", "ACTIVE", "cf-1");
+        hrvaLink("Menu", true);
+        final var menu = link(domain, "menu", true);
+
+        final var response = customDomainRemoval.remove(domain, DomainLinkMode.MOVE, OWNER);
+
+        assertThat(response).isEqualTo(new DomainRemovalResponse(1, List.of(new DomainRename("menu", "k3J9x")), 0));
+        assertThat(aliasOf(menu)).isEqualTo("k3J9x");
     }
 
     @Test
@@ -568,6 +604,7 @@ class CustomDomainRemovalTest {
     @Import({
             AppConfiguration.class,
             CustomDomainRemoval.class,
+            AliasRules.class,
             UrlDomainMoves.class,
             UrlCache.class,
             TestApplication.Fixed.class,

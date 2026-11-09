@@ -29,6 +29,9 @@ import cc.hrva.urlshortener.security.SessionToken;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ReservedAliasService;
+import cc.hrva.urlshortener.service.SuspiciousUrlService;
+import cc.hrva.urlshortener.service.SettingsService;
+import cc.hrva.urlshortener.service.alias.AliasRules;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.UrlService;
@@ -201,6 +204,12 @@ class AdminDomainRequestSecurityTest {
 
     @MockitoBean
     private ReservedAliasService reservedAliasService;
+
+    @MockitoBean
+    private SettingsService settingsService;
+
+    @MockitoBean
+    private SuspiciousUrlService suspiciousUrlService;
 
     @MockitoBean
     private LinkCheckService linkCheckService;
@@ -575,6 +584,7 @@ class AdminDomainRequestSecurityTest {
             CustomDomainApproval.class,
             CustomDomainModeration.class,
             CustomDomainRemoval.class,
+            AliasRules.class,
             UrlDomainMoves.class,
             UrlCache.class,
             TestApplication.FixedClock.class

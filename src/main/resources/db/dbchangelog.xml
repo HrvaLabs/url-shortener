@@ -60,5 +60,6 @@
     <include file="classpath:/db/changelog/052-account-sign-in-check.xml"/>
     <include file="classpath:/db/changelog/053-maintained-link-check-lists.xml"/>
     <include file="classpath:/db/changelog/054-url-via-shortener.xml"/>
+    <include file="classpath:/db/changelog/055-alias-lower-index.xml"/>
 
 </databaseChangeLog>

@@ -10,10 +10,9 @@ import cc.hrva.urlshortener.model.enums.DomainLinkMode;
 import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.UrlDomainMoves;
 import cc.hrva.urlshortener.repository.UrlDomainMoves.DomainLink;
-import cc.hrva.urlshortener.repository.UrlRepository;
-import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.SendingEmailService;
 import cc.hrva.urlshortener.service.UrlService;
+import cc.hrva.urlshortener.service.alias.AliasRules;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -44,9 +43,8 @@ public class CustomDomainRemoval {
 
     private final CustomDomainRepository customDomainRepository;
     private final UrlDomainMoves urlDomainMoves;
-    private final UrlRepository urlRepository;
     private final UrlService urlService;
-    private final ReservedAliasService reservedAliasService;
+    private final AliasRules aliasRules;
     private final UrlCache urlCache;
     private final SendingEmailService sendingEmailService;
     private final ApplicationEventPublisher eventPublisher;
@@ -147,7 +145,7 @@ public class CustomDomainRemoval {
     }
 
     private String keptOrFresh(final String alias) {
-        if (urlRepository.aliasTaken(null, alias) || reservedAliasService.isReserved(alias)) {
+        if (!aliasRules.decideExisting(alias, null, false).usable()) {
             return urlService.nextFreeShortUrl(null);
         }
         return alias;

@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.controller.LinkWarningView;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
 import cc.hrva.urlshortener.repository.BlocklistSourceRepository;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
+import cc.hrva.urlshortener.service.alias.AliasRules;
 import cc.hrva.urlshortener.service.impl.DefaultReviewQueueService;
 import cc.hrva.urlshortener.service.inspection.LinkInspectionService;
 import cc.hrva.urlshortener.service.moderation.ReviewWarningPage;
@@ -741,7 +742,7 @@ class UrlWritesTest {
                     type = FilterType.ASSIGNABLE_TYPE,
                     classes = {UrlRepository.class, CustomDomainRepository.class, UserRepository.class, DomainRuleRepository.class,
                             CampaignRepository.class, LinkReviewRepository.class, BlocklistSourceRepository.class}))
-    @Import({DefaultUrlService.class, DefaultModerationService.class, UrlUpdateDtoToUrlConverter.class, DestinationCheckRepository.class, UrlCache.class,
+    @Import({DefaultUrlService.class, AliasRules.class, DefaultModerationService.class, UrlUpdateDtoToUrlConverter.class, DestinationCheckRepository.class, UrlCache.class,
             DefaultReviewQueueService.class, ReviewWarningPage.class,
             DefaultSettingsTestConfiguration.class, AnonymousLinkSignalsTestConfiguration.class, HumanCheckTestConfiguration.class, SignInFormCheckTestConfiguration.class,
             ClockConfiguration.class})

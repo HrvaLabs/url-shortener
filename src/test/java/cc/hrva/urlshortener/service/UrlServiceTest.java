@@ -87,6 +87,7 @@ import cc.hrva.urlshortener.service.burst.CreatedLink;
 import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
 import cc.hrva.urlshortener.service.domain.DomainRoute;
 import cc.hrva.urlshortener.service.domain.UrlCache;
+import cc.hrva.urlshortener.service.alias.AliasRules;
 import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
 import cc.hrva.urlshortener.service.impl.DefaultSignInFormCheckService;
 import cc.hrva.urlshortener.service.impl.DefaultSuspiciousUrlService;
@@ -296,11 +297,14 @@ class UrlServiceTest {
 
     private AnonymousLinkSignals anonymousLinkSignals;
 
+    private AliasRules aliasRules;
+
     private UrlCache urlCache;
 
     @BeforeEach
     void setUp() {
         urlCache = new UrlCache(cacheManager, mock(TaskScheduler.class), Clock.systemUTC());
+        aliasRules = new AliasRules(settingsService, reservedAliasService, suspiciousUrlService, urlRepository);
         org.mockito.Mockito.lenient().when(rateLimiter.tryAcquire(any(), org.mockito.ArgumentMatchers.anyInt(), any())).thenReturn(true);
         org.mockito.Mockito.lenient().when(customDomainRepository.findStatusForUpdate(anyLong())).thenReturn(Optional.of("ACTIVE"));
         org.mockito.Mockito.lenient().when(urlValidator.checkIfLongUrlIsNotBlocklisted(any())).thenReturn(LinkVerdict.clean());
@@ -340,8 +344,7 @@ class UrlServiceTest {
                 settingsService,
                 withoutTransactions,
                 anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService,
-                destinationChangeService, linkInspectionService, newAccounts, moderationService
-        );
+                destinationChangeService, linkInspectionService, newAccounts, moderationService, aliasRules);
     }
 
     @Test
@@ -2549,7 +2552,7 @@ class UrlServiceTest {
                 passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService, redirectChainService,
                 transactionOperations, reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository,
                 campaignService, settingsService, withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService, destinationChangeService, linkInspectionService,
-                newAccounts, moderationService);
+                newAccounts, moderationService, aliasRules);
     }
 
     private Url anonymousCreateOf(final String longUrl, final LinkVerdict verdict) {
@@ -2759,7 +2762,7 @@ class UrlServiceTest {
         assertThat(result.longUrl()).isEqualTo("long");
 
         verify(reservedAliasService).isReserved(url.getShortUrl());
-        verify(urlRepository).aliasTaken(null, url.getShortUrl());
+        verify(urlRepository).aliasTakenIgnoringCase(null, url.getShortUrl());
         verify(urlValidator).longUrlInUrl(url);
     }
 
@@ -2813,7 +2816,7 @@ class UrlServiceTest {
         final var created = urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
         assertThat(created.shortUrl()).isEqualTo("menu");
-        verify(urlValidator).checkIfShortUrlIsUnique(7L, "menu");
+        verify(urlRepository).aliasTakenIgnoringCase(7L, "menu");
     }
 
     @Test
@@ -2836,19 +2839,19 @@ class UrlServiceTest {
         final var candidates = org.mockito.ArgumentCaptor.forClass(String.class);
         verify(reservedAliasService, times(2)).isReserved(candidates.capture());
         assertThat(url.getShortUrl()).hasSize(5).isEqualTo(candidates.getAllValues().getLast());
-        verify(urlRepository).aliasTaken(null, url.getShortUrl());
+        verify(urlRepository).aliasTakenIgnoringCase(null, url.getShortUrl());
         verify(urlRepository).save(url);
     }
 
     @Test
     void generatedAliasSkipsTakenOnes() {
         final var url = signedInCreate();
-        when(urlRepository.aliasTaken(isNull(), anyString())).thenReturn(true, false);
+        when(urlRepository.aliasTakenIgnoringCase(isNull(), anyString())).thenReturn(true, false);
 
         urlService.saveUrlRouting(CreateUrlDto.builder().longUrl("https://example.com/menu").build(), CLIENT_IP, CreatedVia.WEB);
 
         final var candidates = org.mockito.ArgumentCaptor.forClass(String.class);
-        verify(urlRepository, times(2)).aliasTaken(isNull(), candidates.capture());
+        verify(urlRepository, times(2)).aliasTakenIgnoringCase(isNull(), candidates.capture());
         assertThat(url.getShortUrl()).hasSize(5).isEqualTo(candidates.getAllValues().getLast());
         verify(reservedAliasService, times(2)).isReserved(anyString());
         verify(urlRepository).save(url);
@@ -2867,7 +2870,7 @@ class UrlServiceTest {
                 .hasMessage("Couldn't pick a free short URL. Try again.");
 
         verify(reservedAliasService, times(10)).isReserved(anyString());
-        verify(urlRepository, never()).aliasTaken(isNull(), anyString());
+        verify(urlRepository, never()).aliasTakenIgnoringCase(isNull(), anyString());
         verify(urlRepository, never()).save(any());
     }
 
@@ -2891,6 +2894,69 @@ class UrlServiceTest {
     }
 
     @Test
+    void createRefusesACaseVariant() {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").shortUrl("Karlo-GitHub").build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/menu").shortUrl("Karlo-GitHub").build());
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(urlRepository.aliasTakenIgnoringCase(null, "Karlo-GitHub")).thenReturn(true);
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
+                .isInstanceOf(ShortUrlAlreadyExistsException.class)
+                .hasMessage(UrlValidator.SHORT_URL_TAKEN);
+
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void createRefusesABrandNameForAUser() {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").shortUrl("paypal-login").build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/menu").shortUrl("paypal-login").build());
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(suspiciousUrlService.findBrandInHandle("paypal-login")).thenReturn(Optional.of("paypal"));
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
+                .isInstanceOf(ShortUrlAlreadyExistsException.class)
+                .hasMessage("This name contains the brand name paypal, so it can't be used on hrva.cc. Try another.");
+
+        verify(urlRepository, never()).save(any());
+    }
+
+    @Test
+    void createAllowsABrandNameForAnAdmin() {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").shortUrl("paypal-login").build();
+        final var url = Url.builder().longUrl("https://example.com/menu").shortUrl("paypal-login").build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
+        when(userService.getUserFromToken()).thenReturn(admin());
+        when(urlRepository.save(url)).thenReturn(persisted(url));
+
+        final var created = urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(created.shortUrl()).isEqualTo("paypal-login");
+        verify(suspiciousUrlService, never()).findBrandInHandle(anyString());
+    }
+
+    @Test
+    void createKeepsTheSameMessagesAsBefore() {
+        final var taken = CreateUrlDto.builder().longUrl("https://example.com/menu").shortUrl("taken").build();
+        final var reserved = CreateUrlDto.builder().longUrl("https://example.com/menu").shortUrl("login").build();
+        final var off = CreateUrlDto.builder().longUrl("https://example.com/menu").shortUrl("promo").build();
+        when(createUrlToUrlConverter.convert(taken)).thenReturn(Url.builder().longUrl("https://example.com/menu").shortUrl("taken").build());
+        when(createUrlToUrlConverter.convert(reserved)).thenReturn(Url.builder().longUrl("https://example.com/menu").shortUrl("login").build());
+        when(createUrlToUrlConverter.convert(off)).thenReturn(Url.builder().longUrl("https://example.com/menu").shortUrl("promo").build());
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(urlRepository.aliasTakenIgnoringCase(null, "taken")).thenReturn(true);
+        when(reservedAliasService.isReserved(anyString())).thenAnswer(invocation -> "login".equals(invocation.getArgument(0)));
+
+        assertThatThrownBy(() -> urlService.saveUrlRouting(taken, CLIENT_IP, CreatedVia.WEB))
+                .isInstanceOf(ShortUrlAlreadyExistsException.class).hasMessage("This short URL is already taken. Try another.");
+        assertThatThrownBy(() -> urlService.saveUrlRouting(reserved, CLIENT_IP, CreatedVia.WEB))
+                .isInstanceOf(ShortUrlAlreadyExistsException.class).hasMessage("This short URL is reserved. Try another.");
+        SettingsServiceFixtures.turnOff(settingsService, SettingKey.CUSTOM_ALIASES);
+        assertThatThrownBy(() -> urlService.saveUrlRouting(off, CLIENT_IP, CreatedVia.WEB))
+                .isInstanceOf(UrlValidationException.class).hasMessage("Custom aliases are turned off right now.");
+    }
+
+    @Test
     void customAliasStillGoesThroughTheReservedCheck() {
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").shortUrl("promo").build();
         final var url = Url.builder().longUrl("https://example.com/menu").shortUrl("promo").build();
@@ -2900,12 +2966,11 @@ class UrlServiceTest {
 
         urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
 
-        final var order = inOrder(urlValidator, urlRepository);
-        order.verify(urlValidator).checkIfShortUrlIsUnique(null, "promo");
-        order.verify(urlValidator).checkIfShortUrlIsReserved("promo");
+        final var order = inOrder(reservedAliasService, urlRepository);
+        order.verify(reservedAliasService).isReserved("promo");
+        order.verify(urlRepository).aliasTakenIgnoringCase(null, "promo");
         order.verify(urlRepository).save(url);
         assertThat(url.getShortUrl()).isEqualTo("promo");
-        verifyNoInteractions(reservedAliasService);
     }
 
     @Test
@@ -3209,8 +3274,8 @@ class UrlServiceTest {
 
         assertThat(created.shortUrl()).isEqualTo("menu");
         assertThat(created.domain()).isEqualTo(new DomainRef(7L, "go.example.com"));
-        verify(urlValidator).checkIfShortUrlIsUnique(7L, "menu");
-        verify(urlValidator, never()).checkIfShortUrlIsUnique(isNull(), anyString());
+        verify(urlRepository).aliasTakenIgnoringCase(7L, "menu");
+        verify(urlRepository, never()).aliasTakenIgnoringCase(isNull(), anyString());
     }
 
     @Test
@@ -3219,8 +3284,7 @@ class UrlServiceTest {
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/menu").shortUrl("menu").build());
         when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
         when(customDomainRepository.findUsable("go.example.com", 1L)).thenReturn(Optional.of(goExampleCom(CustomDomainStatus.ACTIVE)));
-        org.mockito.Mockito.doThrow(new ShortUrlAlreadyExistsException(UrlValidator.SHORT_URL_TAKEN))
-                .when(urlValidator).checkIfShortUrlIsUnique(7L, "menu");
+        when(urlRepository.aliasTakenIgnoringCase(7L, "menu")).thenReturn(true);
 
         assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
                 .isInstanceOf(ShortUrlAlreadyExistsException.class)
@@ -3248,12 +3312,12 @@ class UrlServiceTest {
     void randomAliasesArePerDomain() {
         final var url = signedInCreate();
         when(customDomainRepository.findUsable("go.example.com", 1L)).thenReturn(Optional.of(goExampleCom(CustomDomainStatus.ACTIVE)));
-        org.mockito.Mockito.lenient().when(urlRepository.aliasTaken(isNull(), anyString())).thenReturn(true);
+        org.mockito.Mockito.lenient().when(urlRepository.aliasTakenIgnoringCase(isNull(), anyString())).thenReturn(true);
 
         urlService.saveUrlRouting(onTheDomain("go.example.com"), CLIENT_IP, CreatedVia.WEB);
 
-        verify(urlRepository).aliasTaken(7L, url.getShortUrl());
-        verify(urlRepository, never()).aliasTaken(isNull(), anyString());
+        verify(urlRepository).aliasTakenIgnoringCase(7L, url.getShortUrl());
+        verify(urlRepository, never()).aliasTakenIgnoringCase(isNull(), anyString());
         verify(urlRepository).save(url);
     }
 
@@ -3261,12 +3325,12 @@ class UrlServiceTest {
     void aRandomAliasTakenOnTheDomainIsSkipped() {
         final var url = signedInCreate();
         when(customDomainRepository.findUsable("go.example.com", 1L)).thenReturn(Optional.of(goExampleCom(CustomDomainStatus.ACTIVE)));
-        when(urlRepository.aliasTaken(eq(7L), anyString())).thenReturn(true, false);
+        when(urlRepository.aliasTakenIgnoringCase(eq(7L), anyString())).thenReturn(true, false);
 
         urlService.saveUrlRouting(onTheDomain("go.example.com"), CLIENT_IP, CreatedVia.WEB);
 
         final var candidates = ArgumentCaptor.forClass(String.class);
-        verify(urlRepository, times(2)).aliasTaken(eq(7L), candidates.capture());
+        verify(urlRepository, times(2)).aliasTakenIgnoringCase(eq(7L), candidates.capture());
         assertThat(url.getShortUrl()).isEqualTo(candidates.getAllValues().getLast());
     }
 
@@ -3276,14 +3340,13 @@ class UrlServiceTest {
         when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(Url.builder().longUrl("https://example.com/menu").shortUrl("login").build());
         when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
         when(customDomainRepository.findUsable("go.example.com", 1L)).thenReturn(Optional.of(goExampleCom(CustomDomainStatus.ACTIVE)));
-        org.mockito.Mockito.doThrow(new ShortUrlAlreadyExistsException("This short URL is reserved. Try another."))
-                .when(urlValidator).checkIfShortUrlIsReserved("login");
+        when(reservedAliasService.isReserved("login")).thenReturn(true);
 
         assertThatThrownBy(() -> urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB))
                 .isInstanceOf(ShortUrlAlreadyExistsException.class)
                 .hasMessage("This short URL is reserved. Try another.");
 
-        verify(urlValidator).checkIfShortUrlIsUnique(7L, "login");
+        verify(urlRepository, never()).aliasTakenIgnoringCase(any(), anyString());
         verify(urlRepository, never()).save(any());
     }
 
@@ -3298,18 +3361,18 @@ class UrlServiceTest {
         final var candidates = ArgumentCaptor.forClass(String.class);
         verify(reservedAliasService, times(2)).isReserved(candidates.capture());
         assertThat(url.getShortUrl()).isEqualTo(candidates.getAllValues().getLast());
-        verify(urlRepository).aliasTaken(7L, url.getShortUrl());
+        verify(urlRepository).aliasTakenIgnoringCase(7L, url.getShortUrl());
     }
 
     @Test
     void aFreeAliasIsDrawnForTheGivenDomain() {
         when(appProperties.getShortUrlLength()).thenReturn(5L);
-        when(urlRepository.aliasTaken(isNull(), anyString())).thenReturn(true, false);
+        when(urlRepository.aliasTakenIgnoringCase(isNull(), anyString())).thenReturn(true, false);
 
         final var alias = urlService.nextFreeShortUrl(null);
 
         final var candidates = ArgumentCaptor.forClass(String.class);
-        verify(urlRepository, times(2)).aliasTaken(isNull(), candidates.capture());
+        verify(urlRepository, times(2)).aliasTakenIgnoringCase(isNull(), candidates.capture());
         assertThat(alias).hasSize(5).isEqualTo(candidates.getAllValues().getLast());
         verify(reservedAliasService, times(2)).isReserved(anyString());
     }
@@ -5640,7 +5703,7 @@ class UrlServiceTest {
                 reviewQueueService, scammerSignalService, clickCheckService, redirectChainService, TransactionOperations.withoutTransaction(),
                 reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository, campaignService, settingsService,
                 withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService, destinationChangeService, linkInspectionService,
-                newAccounts, moderationService);
+                newAccounts, moderationService, aliasRules);
     }
 
     private static UrlService withTheCacheAnnotations(final UrlService service, final CacheManager urls) {
@@ -5712,8 +5775,7 @@ class UrlServiceTest {
                 settingsService,
                 withoutTransactions,
                 anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService,
-                destinationChangeService, linkInspectionService, newAccounts, moderationService
-        );
+                destinationChangeService, linkInspectionService, newAccounts, moderationService, aliasRules);
     }
 
     private void recordTransactionDuringCheck(final String longUrl, final AtomicReference<Boolean> transactionActive) {
@@ -5800,8 +5862,7 @@ class UrlServiceTest {
                 settingsService,
                 transactionManager,
                 anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService,
-                destinationChangeService, linkInspectionService, newAccounts, moderationService
-        );
+                destinationChangeService, linkInspectionService, newAccounts, moderationService, aliasRules);
         final var proxyFactory = new ProxyFactory(service);
         proxyFactory.addAdvice(new TransactionInterceptor(transactionManager, new AnnotationTransactionAttributeSource()));
         return (UrlService) proxyFactory.getProxy();
@@ -5840,8 +5901,7 @@ class UrlServiceTest {
                 settingsService,
                 withoutTransactions,
                 anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService,
-                destinationChangeService, linkInspectionService, newAccounts, moderationService
-        );
+                destinationChangeService, linkInspectionService, newAccounts, moderationService, aliasRules);
     }
 
     private UrlService urlServiceLimitedBy(final RateLimiter limiter) {
@@ -5876,8 +5936,7 @@ class UrlServiceTest {
                 settingsService,
                 withoutTransactions,
                 anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService,
-                destinationChangeService, linkInspectionService, newAccounts, moderationService
-        );
+                destinationChangeService, linkInspectionService, newAccounts, moderationService, aliasRules);
     }
 
     private void stubLinkCreation() {

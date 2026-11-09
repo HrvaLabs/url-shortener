@@ -39,6 +39,16 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
         return domainId == null ? existsByDomainIsNullAndShortUrl(alias) : existsByDomain_IdAndShortUrl(domainId, alias);
     }
 
+    default boolean aliasTakenIgnoringCase(final Long domainId, final String alias) {
+        return domainId == null ? hrvaAliasTakenIgnoringCase(alias) : domainAliasTakenIgnoringCase(domainId, alias);
+    }
+
+    @Query("select count(u) > 0 from Url u where u.domain is null and lower(u.shortUrl) = lower(:alias)")
+    boolean hrvaAliasTakenIgnoringCase(@Param("alias") String alias);
+
+    @Query("select count(u) > 0 from Url u where u.domain.id = :domainId and lower(u.shortUrl) = lower(:alias)")
+    boolean domainAliasTakenIgnoringCase(@Param("domainId") Long domainId, @Param("alias") String alias);
+
     default boolean aliasActive(final Long domainId, final String alias) {
         return domainId == null ? existsByDomainIsNullAndShortUrlAndActiveTrue(alias) : existsByDomain_IdAndShortUrlAndActiveTrue(domainId, alias);
     }
