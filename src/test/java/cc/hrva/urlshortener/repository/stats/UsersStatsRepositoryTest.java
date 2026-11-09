@@ -56,15 +56,15 @@ class UsersStatsRepositoryTest {
     }
 
     @Test
-    void countsSignupSourcesOfAccountsCreatedInsideTheWindowOnly() {
+    void countsEverySignupSourceAnswerAllTime() {
         answeredAccount(9801, "AI_ASSISTANT", NOW.minusDays(2));
         answeredAccount(9802, "AI_ASSISTANT", NOW.minusDays(1));
-        answeredAccount(9803, "AI_ASSISTANT", NOW.minusDays(20));
+        answeredAccount(9803, "AI_ASSISTANT", NOW.minusDays(900));
         answeredAccount(9804, "SKIPPED", NOW.minusDays(3));
         answeredAccount(9805, null, NOW.minusDays(3));
 
-        assertThat(usersStatsRepository.countSignupSources(NOW.minusDays(7), NOW))
-                .containsExactlyInAnyOrder(new CountEntry("AI_ASSISTANT", 2), new CountEntry("SKIPPED", 1));
+        assertThat(usersStatsRepository.countSignupSources())
+                .containsExactlyInAnyOrder(new CountEntry("AI_ASSISTANT", 3), new CountEntry("SKIPPED", 1));
     }
 
     @Test

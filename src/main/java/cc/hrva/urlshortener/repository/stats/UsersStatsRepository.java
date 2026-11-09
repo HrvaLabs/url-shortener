@@ -79,7 +79,7 @@ public class UsersStatsRepository {
 
     private static final String COUNT_SIGNUP_SOURCES = """
             select signup_source, count(*) as total from user_account
-            where signup_source is not null and create_date >= :start and create_date < :end
+            where signup_source is not null
             group by signup_source
             """;
 
@@ -126,8 +126,8 @@ public class UsersStatsRepository {
                 row.getLong("hidden_pages")));
     }
 
-    public List<CountEntry> countSignupSources(final LocalDateTime start, final LocalDateTime end) {
-        return jdbcTemplate.query(COUNT_SIGNUP_SOURCES, Map.of("start", start, "end", end), (row, rowNumber) ->
+    public List<CountEntry> countSignupSources() {
+        return jdbcTemplate.query(COUNT_SIGNUP_SOURCES, Map.of(), (row, rowNumber) ->
                 new CountEntry(row.getString("signup_source"), row.getLong("total")));
     }
 

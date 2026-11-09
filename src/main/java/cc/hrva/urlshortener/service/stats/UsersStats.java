@@ -50,11 +50,11 @@ public class UsersStats {
                 usersStatsRepository.countMcp(now),
                 usersStatsRepository.countBioPages(),
                 usersStatsRepository.countNotifications(),
-                signupSources(window));
+                signupSources());
     }
 
-    private List<CountEntry> signupSources(final StatsWindow window) {
-        final var counts = usersStatsRepository.countSignupSources(window.start(), window.end()).stream()
+    private List<CountEntry> signupSources() {
+        final var counts = usersStatsRepository.countSignupSources().stream()
                 .collect(Collectors.toMap(CountEntry::value, CountEntry::count));
 
         return Arrays.stream(SignupSource.values())

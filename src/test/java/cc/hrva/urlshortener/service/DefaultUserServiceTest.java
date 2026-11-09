@@ -359,10 +359,10 @@ class DefaultUserServiceTest {
     }
 
     @Test
-    void anAccountOlderThan30DaysIsNotAsked() {
-        signedInAs(User.builder().id(1L).email("test@example.com").createDate(LocalDateTime.now().minusDays(31)).build());
+    void anOldAccountWithoutAnAnswerIsAskedToo() {
+        signedInAs(User.builder().id(1L).email("test@example.com").createDate(LocalDateTime.now().minusDays(400)).build());
 
-        assertThat(userService.fetchCurrentUser().getAskSignupSource()).isFalse();
+        assertThat(userService.fetchCurrentUser().getAskSignupSource()).isTrue();
     }
 
     @Test

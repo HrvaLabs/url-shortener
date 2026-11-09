@@ -82,8 +82,6 @@ public class DefaultUserService implements UserService {
             .byDefault(Sort.by(Sort.Order.desc(CREATE_DATE)))
             .thenBy(Sort.Order.desc("id"));
 
-    private static final int SIGNUP_QUESTION_DAYS = 30;
-
     private final AppProperties appProperties;
     private final Reauthentication reauthentication;
     private final UrlRepository urlRepository;
@@ -142,7 +140,7 @@ public class DefaultUserService implements UserService {
         final var userDto = userToUserDtoConverter.convert(user);
         userDto.setSignInMethods(signInMethodService.methodsOf(user.getId()));
         userDto.setPasswordSet(signInMethodService.passwordSet(user));
-        userDto.setAskSignupSource(user.getSignupSource() == null && isWithinSignupQuestionWindow(user));
+        userDto.setAskSignupSource(user.getSignupSource() == null);
 
         return userDto;
     }
@@ -158,10 +156,6 @@ public class DefaultUserService implements UserService {
         user.setSignupSource(source);
         userRepository.save(user);
         log.info("Sign-up source answered id={} skipped={}", user.getId(), source == SignupSource.SKIPPED);
-    }
-
-    private boolean isWithinSignupQuestionWindow(final User user) {
-        return user.getCreateDate() != null && user.getCreateDate().isAfter(LocalDateTime.now().minusDays(SIGNUP_QUESTION_DAYS));
     }
 
     @Override

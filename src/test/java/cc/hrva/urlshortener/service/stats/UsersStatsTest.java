@@ -65,7 +65,7 @@ class UsersStatsTest {
     @Test
     void signupSourcesListEveryAnswerInEnumOrderWithZeroForTheUnanswered() {
         givenCounts(NO_ACCOUNTS, STORED_NOW, NO_API_KEYS, NO_MCP, NO_BIO_PAGES);
-        when(usersStatsRepository.countSignupSources(WINDOW.start(), WINDOW.end())).thenReturn(List.of(
+        when(usersStatsRepository.countSignupSources()).thenReturn(List.of(
                 new CountEntry("SKIPPED", 1),
                 new CountEntry("AI_ASSISTANT", 2)));
 
