@@ -223,6 +223,19 @@ class CustomDomainRemovalTest {
     }
 
     @Test
+    void aMovedLinkWhoseNameLooksLikeAnHrvaCcPageGetsARandomAlias() {
+        final var domain = domain("go.example.com", "ACTIVE", "cf-1");
+        final var support = link(domain, "support", true);
+        final var menu = link(domain, "menu", true);
+
+        final var response = customDomainRemoval.remove(domain, DomainLinkMode.MOVE, OWNER);
+
+        assertThat(response).isEqualTo(new DomainRemovalResponse(2, List.of(new DomainRename("support", "k3J9x")), 0));
+        assertThat(aliasOf(support)).isEqualTo("k3J9x");
+        assertThat(aliasOf(menu)).isEqualTo("menu");
+    }
+
+    @Test
     void aMovedLinkWhoseNameIsTakenByCaseGetsARandomAlias() {
         final var domain = domain("go.example.com", "ACTIVE", "cf-1");
         hrvaLink("Menu", true);

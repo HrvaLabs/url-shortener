@@ -29,7 +29,7 @@ public class PublicAliasController {
     private static final String RATE_LIMIT_NAME = "alias-check";
     private static final int REQUESTS_PER_CLIENT = 120;
     private static final Duration REQUEST_WINDOW = Duration.ofHours(1);
-    private static final String TOO_MANY_REQUESTS = "You've checked a lot of names in a short time. Try again in an hour.";
+    private static final String TOO_MANY_REQUESTS = "You've checked a lot of names in a short time. Try again later.";
 
     private final AliasRules aliasRules;
     private final RateLimiter rateLimiter;

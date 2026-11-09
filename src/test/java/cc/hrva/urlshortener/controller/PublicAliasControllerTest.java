@@ -49,7 +49,7 @@ class PublicAliasControllerTest {
 
     private static final String ALIAS_CHECK = "/api/v1/public/alias-check";
     private static final String CLIENT_IP = "203.0.113.7";
-    private static final String TOO_MANY = "You've checked a lot of names in a short time. Try again in an hour.";
+    private static final String TOO_MANY = "You've checked a lot of names in a short time. Try again later.";
 
     private final AppProperties appProperties = new AppProperties();
     private final ReservedAliasService reservedAliasService = mock(ReservedAliasService.class);
@@ -116,6 +116,13 @@ class PublicAliasControllerTest {
         countingMockMvc().perform(get(ALIAS_CHECK).param("name", "api"))
                 .andExpect(jsonPath("$.status").value("RESERVED"))
                 .andExpect(jsonPath("$.reason").value("This short URL is reserved. Try another."));
+    }
+
+    @Test
+    void aNameThatLooksLikeAnHrvaCcPageIsReservedWithItsReason() throws Exception {
+        countingMockMvc().perform(get(ALIAS_CHECK).param("name", "hrva-support"))
+                .andExpect(jsonPath("$.status").value("RESERVED"))
+                .andExpect(jsonPath("$.reason").value("This name looks like one of hrva.cc's own pages, so it can't be used. Try another."));
     }
 
     @Test

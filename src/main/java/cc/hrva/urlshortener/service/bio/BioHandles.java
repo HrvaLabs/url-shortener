@@ -25,12 +25,12 @@ import org.springframework.stereotype.Component;
 public class BioHandles {
 
     static final Duration HOLD = Duration.ofDays(30);
-    static final Set<String> SYSTEM_WORDS = Set.of(
+    public static final Set<String> SYSTEM_WORDS = Set.of(
             "abuse", "admin", "administrator", "api", "app", "auth", "bio", "blog", "changelog", "connect", "contact",
             "dashboard", "help", "hrva", "hrvacc", "hrvalabs", "login", "logout", "mail", "mcp", "moderator", "null",
             "official", "privacy", "register", "report", "root", "security", "settings", "staff", "stats", "support",
             "system", "team", "terms", "unavailable", "undefined", "www");
-    static final Set<String> SERVICE_NAMES = Set.of("hrva", "hrvacc", "hrvalabs");
+    public static final Set<String> SERVICE_NAMES = Set.of("hrva", "hrvacc", "hrvalabs");
 
     private static final int MIN_LENGTH = 3;
     private static final int MAX_LENGTH = 30;

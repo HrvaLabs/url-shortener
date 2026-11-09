@@ -91,6 +91,27 @@ class AliasRulesTest {
                 .isEqualTo(new AliasDecision(AliasStatus.RESERVED, "This name contains the brand name paypal, so it can't be used on hrva.cc. Try another."));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"support", "Admin", "hrva-support", "hrvalabs_news", "HRVA-Login"})
+    void aNameThatLooksLikeAnHrvaCcPageIsReservedOnHrvaCc(final String alias) {
+        assertThat(aliasRules.decide(alias, null, false))
+                .isEqualTo(new AliasDecision(AliasStatus.RESERVED, "This name looks like one of hrva.cc's own pages, so it can't be used. Try another."));
+        assertThat(aliasRules.decideExisting(alias, null, false).status()).isEqualTo(AliasStatus.RESERVED);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"support", "admin", "hrva-support"})
+    void aNameThatLooksLikeAnHrvaCcPageIsAllowedOnACustomDomainAndForAdmins(final String alias) {
+        assertThat(aliasRules.decide(alias, DOMAIN, false).usable()).isTrue();
+        assertThat(aliasRules.decide(alias, null, true).usable()).isTrue();
+    }
+
+    @Test
+    void aNameThatOnlyContainsAServiceNameIsNotRefused() {
+        assertThat(aliasRules.decide("my-hrva", null, false).usable()).isTrue();
+        assertThat(aliasRules.decide("supportive", null, false).usable()).isTrue();
+    }
+
     @Test
     void aBrandNameIsAllowedForBrandExemptCallers() {
         assertThat(aliasRules.decide("paypal-login", null, true).usable()).isTrue();
