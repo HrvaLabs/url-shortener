@@ -83,8 +83,9 @@
 # link, the problem for Accept: application/json) while a cached link still redirects.
 # Section 32 checks v2.27's Edit link: 044 ran and the earlier domain block was recorded on the account; a destination change through
 # an API key refused with the list of what's missing, then allowed once the account is in good standing (set in Postgres), recorded in
-# the history and the audit log, and the redirect follows at once; a blocked destination and another shortener refused; the sixth change
-# of the day a 429 with the counter's time left; the DESTINATION_CHANGES switch stopping the owner but not the admin; a used-up and an
+# the history and the audit log, and the redirect follows at once; a blocked destination refused and another shortener accepted (on a
+# link of its own, then deleted); the sixth change of the day a 429 with the counter's time left; the DESTINATION_CHANGES switch
+# stopping the owner but not the admin; a used-up and an
 # expired link turned back on by one save; an admin's blocked destination answered with the verdict and saved, marked forced, only with
 # force: true; the per-account override (Never allowed stopping an owner in good standing, Always allowed letting one with two-step off, the
 # audit rows and the user list, with a visitor's report on the link counting against nothing and staying open); and the admin's paged
@@ -3027,15 +3028,23 @@ EDIT_RULE_ID=$(jq -r .rule.id <<<"$HTTP_BODY")
 edit_link "$EDIT_ID" '"longUrl":"https://e2e-edit-blocked.com/x"'
 expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" \
     "400 This destination is on a blocklist and can't be shortened. If you think that's a mistake, write to support@hrva.cc." "a blocked destination is refused like a new link"
-edit_link "$EDIT_ID" '"longUrl":"https://bit.ly/e2e-edit"'
-expect_eq "$HTTP_STATUS $(jq -r .detail <<<"$HTTP_BODY")" \
-    "400 Links to other URL shorteners can't be shortened. Use the final destination instead." "another shortener is refused like a new link"
 expect_eq "$(psql_value "select long_url from url where id = $EDIT_ID;")" "https://e2e-edit.com/second" "the destination is unchanged"
 http -X DELETE "$BASE/api/v1/admin/domain-rules/$EDIT_RULE_ID" -H "Authorization: Bearer $ADMIN_JWT"
+http -X POST "$BASE/api/v1/urls" -H "X-Api-Key: $OWNER_KEY" -H 'Content-Type: application/json' \
+    -d '{"longUrl":"https://e2e-edit.com/via-shortener","shortUrl":"e2e-edit-shortener"}'
+expect_eq "$HTTP_STATUS" 201 "a second link, e2e-edit-shortener, so the counts and history of e2e-edit stay as they are"
+SHORTENER_EDIT_ID=$(jq -r .id <<<"$HTTP_BODY")
+edit_link "$SHORTENER_EDIT_ID" '"longUrl":"https://bit.ly/e2e-edit"'
+expect_eq "$HTTP_STATUS $(jq -r .longUrl <<<"$HTTP_BODY")" "200 https://bit.ly/e2e-edit" \
+    "another shortener is accepted like a new link (v2.33: hrva.cc follows it and checks where it ends)"
+expect_eq "$(psql_value "select long_url from url where id = $SHORTENER_EDIT_ID;")" "https://bit.ly/e2e-edit" "and saved"
+http -X DELETE "$BASE/api/v1/urls/$SHORTENER_EDIT_ID" -H "Authorization: Bearer $EDIT_JWT"
+expect_eq "$HTTP_STATUS $(psql_value "select count(*) from link_review where url_id = $SHORTENER_EDIT_ID;")" "204 0" \
+    "the owner deletes it, with any review the shortener lists opened, so the owner stays in good standing"
 
 echo "  --- at most 5 changes per link a day"
 EDIT_COUNT=$(docker exec "$REDIS_CONTAINER" redis-cli --raw get "rate-limit:destination-change:$EDIT_ID")
-expect_eq "$EDIT_COUNT" 1 "only the saved change was counted, not the two refused ones"
+expect_eq "$EDIT_COUNT" 1 "only the saved change was counted, not the refused one"
 for (( change = EDIT_COUNT + 1; change <= 5; change++ )); do
     edit_link "$EDIT_ID" "\"longUrl\":\"https://e2e-edit.com/change-$change\""
     expect_eq "$HTTP_STATUS" 200 "change $change of 5"
