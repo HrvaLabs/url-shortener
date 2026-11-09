@@ -75,6 +75,7 @@ class EveryEndpointIsPublicOrSignedInTest {
             "GET /@{handle:.+}",
             "GET /error",
             "GET /.well-known/security.txt",
+            "GET /.well-known/openai-apps-challenge",
             "GET /api/changelog",
             "GET /api/v1/public/settings",
             "GET /api/v1/public/stats",

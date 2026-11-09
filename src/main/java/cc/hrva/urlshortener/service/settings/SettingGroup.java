@@ -13,7 +13,8 @@ public enum SettingGroup {
     ALERTS("Alerts"),
     DIGEST("Digest"),
     EMAILS("Emails"),
-    ABUSE_REPORTS("Abuse reports");
+    ABUSE_REPORTS("Abuse reports"),
+    APP_DIRECTORIES("App directories");
 
     private final String label;
 

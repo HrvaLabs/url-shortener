@@ -120,7 +120,7 @@ class SettingValuesTest {
             assertThat(key.getMax()).isNull();
         }
         if (key.getType() == SettingType.TEXT) {
-            assertThat(key.getMinLength()).isPositive();
+            assertThat(key.getMinLength()).isNotNegative();
             assertThat(key.getMaxLength()).isGreaterThanOrEqualTo(key.getMinLength());
         } else {
             assertThat(key.getMinLength()).isNull();
@@ -491,7 +491,7 @@ class SettingValuesTest {
         final var keys = Arrays.asList(SettingKey.values());
         assertThat(keys).extracting(SettingKey::getLabel).doesNotHaveDuplicates();
         assertThat(Arrays.stream(SettingGroup.values()).map(SettingGroup::getLabel))
-                .containsExactly("Access", "Links", "Safety", "Alerts", "Digest", "Emails", "Abuse reports");
+                .containsExactly("Access", "Links", "Safety", "Alerts", "Digest", "Emails", "Abuse reports", "App directories");
     }
 
     @Test
@@ -514,6 +514,25 @@ class SettingValuesTest {
         assertThat(defaults.defaultOf(SettingKey.ABUSE_REPORTER_ADDRESS)).isEqualTo(List.of("abuse@hrva.cc"));
         assertThat(defaults.defaultOf(SettingKey.ABUSE_CC)).isEqualTo(List.of("reportphishing@apwg.org"));
         assertThat(defaults.defaultOf(SettingKey.ABUSE_RECHECK_DAYS)).isEqualTo(30);
+    }
+
+    @Test
+    void anEmptyValueIsAccepted() {
+        assertThat(SettingValues.parse(SettingKey.OPENAI_APPS_CHALLENGE, NODES.stringNode(""))).isEqualTo("");
+        assertThat(SettingValues.parse(SettingKey.OPENAI_APPS_CHALLENGE, NODES.stringNode("  token  "))).isEqualTo("token");
+        assertThat(SettingValues.fromStored(SettingKey.OPENAI_APPS_CHALLENGE, "\"\"")).isEqualTo("");
+        assertRefused(SettingKey.OPENAI_APPS_CHALLENGE, NODES.stringNode("x".repeat(201)), "Use 0 to 200 characters.");
+        assertRefused(SettingKey.OPENAI_APPS_CHALLENGE, NODES.nullNode(), "Use 0 to 200 characters.");
+    }
+
+    @Test
+    void theOpenAiChallengeRow() {
+        assertThat(SettingKey.OPENAI_APPS_CHALLENGE).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
+                        SettingKey::getParent, SettingKey::getMinLength, SettingKey::getMaxLength)
+                .containsExactly(SettingGroup.APP_DIRECTORIES, SettingType.TEXT, "OpenAI apps challenge token",
+                        "Shown as plain text at hrva.cc/.well-known/openai-apps-challenge while OpenAI checks the domain. Empty answers 404.", null, 0, 200);
+        assertThat(SettingGroup.APP_DIRECTORIES.getLabel()).isEqualTo("App directories");
+        assertThat(new SettingDefaults(new AppProperties(), SettingsServiceFixtures.bothProviders()).defaultOf(SettingKey.OPENAI_APPS_CHALLENGE)).isEqualTo("");
     }
 
     @Test

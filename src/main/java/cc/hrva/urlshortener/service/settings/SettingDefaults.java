@@ -68,6 +68,7 @@ public class SettingDefaults {
         register(SettingKey.ABUSE_REPORTER_ADDRESS, () -> List.of(abuseReports.getReporterAddress()));
         register(SettingKey.ABUSE_CC, () -> List.copyOf(abuseReports.getCc()));
         register(SettingKey.ABUSE_RECHECK_DAYS, abuseReports::getRecheckDays);
+        register(SettingKey.OPENAI_APPS_CHALLENGE, () -> "");
         register(SettingKey.GOOGLE_SIGN_IN, moderation::isGoogleSignIn);
         register(SettingKey.GITHUB_SIGN_IN, moderation::isGithubSignIn);
         register(SettingKey.RANDOM_DOMAIN_REVIEW, moderation::isRandomDomainReview);

@@ -23,6 +23,7 @@ final class PublicRoutes {
             get("/*"),
             get("/*/"),
             get("/.well-known/security.txt"),
+            get("/.well-known/openai-apps-challenge"),
             get("/api/changelog"),
             get("/api/v1/public/settings"),
             get("/api/v1/public/stats"),

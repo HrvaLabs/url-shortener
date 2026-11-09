@@ -103,7 +103,7 @@ public final class SettingValues {
 
     private static String textOf(final SettingKey key, final JsonNode value) {
         final var text = value == null || !value.isString() ? null : value.stringValue().strip();
-        if (text == null || text.isEmpty() || text.codePointCount(0, text.length()) < key.getMinLength()
+        if (text == null || text.codePointCount(0, text.length()) < key.getMinLength()
                 || text.codePointCount(0, text.length()) > key.getMaxLength()) {
             throw new FieldValidationException(FIELD, String.format(Locale.ENGLISH, TEXT_TEXT, key.getMinLength(), key.getMaxLength()));
         }

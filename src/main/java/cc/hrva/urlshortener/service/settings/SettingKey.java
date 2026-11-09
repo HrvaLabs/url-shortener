@@ -84,6 +84,8 @@ public enum SettingKey {
             "Copied on every report email.", 0, 5),
     ABUSE_RECHECK_DAYS(SettingGroup.ABUSE_REPORTS, "Abuse reports: recheck for",
             "Reported domains are looked up every day for this many days.", null, 1, 90, "days"),
+    OPENAI_APPS_CHALLENGE(SettingGroup.APP_DIRECTORIES, SettingType.TEXT, "OpenAI apps challenge token",
+            "Shown as plain text at hrva.cc/.well-known/openai-apps-challenge while OpenAI checks the domain. Empty answers 404.", 0, 200),
     GOOGLE_SIGN_IN(SettingGroup.ACCESS, "Sign in with Google",
             "The Google button on the sign-in and register pages. Off refuses every Google sign-in; accounts without a password or passkey "
                     + "need Forgot password meanwhile.", null, false),
