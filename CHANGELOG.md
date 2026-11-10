@@ -4,6 +4,20 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.35] — 2026-11-10
+
+Your links and analytics update every 10 seconds while you watch.
+
+### 📊 Analytics
+- URLs and Analytics now update by themselves every 10 seconds while the page is open, so a new click shows up without a reload, and a visit or click count that went up is highlighted for a moment. In a tab you aren't looking at, the updates pause and catch up when you come back.
+- The Visits column in URLs counts daily unique visitors, so a second click from the same person on the same day doesn't change it. Clicks in Analytics counts every click except bots, which Bot clicks counts apart.
+- If an update fails, the numbers stay on screen with a note that they may be out of date and a Retry button, instead of the page switching to an error.
+
+### 🔧 Admin
+- All URLs and the Stats tabs update every 10 seconds too. Where visits come from and Landing pages don't: Cloudflare's counts are read once an hour.
+
+---
+
 ## [v2.34] — 2026-11-09
 
 A page for short links on your own domain, a check for whether a custom name is free, and refusals that name the support address.
