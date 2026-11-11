@@ -40,6 +40,7 @@ public class DefaultUrlValidator implements UrlValidator {
     private static final String STILL_BLOCKED = "This destination is still blocked: ";
     private static final String REASON_SEPARATOR = ", ";
     private static final String SAFE_BROWSING_REASON = "Google Safe Browsing: ";
+    private static final String SAFE_BROWSING_UNAVAILABLE = "URL safety check is temporarily unavailable. Please try again later.";
 
     private static final int MAX_HOST_LENGTH = 253;
     private static final Pattern WEB_ADDRESS_PREFIX = Pattern.compile("^https?://[^/]", Pattern.CASE_INSENSITIVE);
@@ -82,7 +83,7 @@ public class DefaultUrlValidator implements UrlValidator {
         final var verdict = isCurrentUserAdmin() && linkCheckService.isAllowListed(url.getLongUrl())
                 ? LinkVerdict.clean()
                 : linkCheckService.check(url.getLongUrl());
-        final var threats = settingsService.isOn(SettingKey.SAFE_BROWSING_CHECK) ? safeBrowsingService.checkUrlsForThreats(url.getLongUrl()) : List.<String>of();
+        final var threats = settingsService.isOn(SettingKey.SAFE_BROWSING_CHECK) ? threatsOf(url.getLongUrl()) : List.<String>of();
         if (threats.isEmpty()) {
             return verdict;
         }
@@ -173,8 +174,19 @@ public class DefaultUrlValidator implements UrlValidator {
         if (!settingsService.isOn(SettingKey.SAFE_BROWSING_CHECK)) {
             return;
         }
-        if (!safeBrowsingService.checkUrlsForThreats(url.getLongUrl()).isEmpty()) {
+        if (!threatsOf(url.getLongUrl()).isEmpty()) {
             throw new UrlValidationException("This URL was flagged as unsafe and cannot be shortened");
+        }
+    }
+
+    private List<String> threatsOf(final String longUrl) {
+        try {
+            return safeBrowsingService.checkUrlsForThreats(longUrl);
+        } catch (final SafeBrowsingUnavailableException exception) {
+            if (settingsService.isOn(SettingKey.SAFE_BROWSING_FAIL_CLOSED)) {
+                throw new UrlValidationException(SAFE_BROWSING_UNAVAILABLE);
+            }
+            return List.of();
         }
     }
 

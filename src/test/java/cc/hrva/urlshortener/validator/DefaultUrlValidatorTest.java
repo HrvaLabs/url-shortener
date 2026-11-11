@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.dto.LinkVerdict.Outcome;
 import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.exception.LongUrlNotSpecifiedException;
 import cc.hrva.urlshortener.exception.NoAuthorizationException;
+import cc.hrva.urlshortener.exception.SafeBrowsingUnavailableException;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.codebook.Authorities;
 import cc.hrva.urlshortener.model.enums.BlockReason;
@@ -640,6 +641,49 @@ class DefaultUrlValidatorTest {
         assertThatThrownBy(() -> urlValidator.checkIfUrlSafe(url))
                 .isInstanceOf(UrlValidationException.class)
                 .hasMessage("This URL was flagged as unsafe and cannot be shortened");
+    }
+
+    @Test
+    void safeBrowsingOutageLetsTheLinkThroughWhileFailClosedIsOff() {
+        final var url = Url.builder().longUrl("https://site.example/page").build();
+        when(safeBrowsingService.checkUrlsForThreats("https://site.example/page")).thenThrow(new SafeBrowsingUnavailableException("HTTP 503 UNAVAILABLE"));
+
+        assertThatCode(() -> urlValidator.checkIfUrlSafe(url)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void safeBrowsingOutageRefusesTheLinkWhileFailClosedIsOn() {
+        final var url = Url.builder().longUrl("https://site.example/page").build();
+        SettingsServiceFixtures.turnOn(settingsService, SettingKey.SAFE_BROWSING_FAIL_CLOSED);
+        when(safeBrowsingService.checkUrlsForThreats("https://site.example/page")).thenThrow(new SafeBrowsingUnavailableException("HTTP 503 UNAVAILABLE"));
+
+        assertThatThrownBy(() -> urlValidator.checkIfUrlSafe(url))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("URL safety check is temporarily unavailable. Please try again later.");
+    }
+
+    @Test
+    void safeBrowsingOutageLeavesANewDestinationWithTheLinkChecksVerdictWhileFailClosedIsOff() {
+        final var url = Url.builder().longUrl("https://site.example/page").build();
+        final var flagged = new LinkVerdict(Outcome.FLAG, List.of("young domain"), null, null);
+        when(userService.getUserFromToken()).thenReturn(userWithRole(2L, "ROLE_USER"));
+        when(linkCheckService.check("https://site.example/page")).thenReturn(flagged);
+        when(safeBrowsingService.checkUrlsForThreats("https://site.example/page")).thenThrow(new SafeBrowsingUnavailableException("HTTP 503 UNAVAILABLE"));
+
+        assertThat(urlValidator.destinationVerdict(url)).isEqualTo(flagged);
+    }
+
+    @Test
+    void safeBrowsingOutageRefusesANewDestinationWhileFailClosedIsOn() {
+        final var url = Url.builder().longUrl("https://site.example/page").build();
+        SettingsServiceFixtures.turnOn(settingsService, SettingKey.SAFE_BROWSING_FAIL_CLOSED);
+        when(userService.getUserFromToken()).thenReturn(userWithRole(2L, "ROLE_USER"));
+        when(linkCheckService.check("https://site.example/page")).thenReturn(LinkVerdict.clean());
+        when(safeBrowsingService.checkUrlsForThreats("https://site.example/page")).thenThrow(new SafeBrowsingUnavailableException("HTTP 503 UNAVAILABLE"));
+
+        assertThatThrownBy(() -> urlValidator.destinationVerdict(url))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("URL safety check is temporarily unavailable. Please try again later.");
     }
 
     private void assertLongUrlRejected(final String longUrl) {

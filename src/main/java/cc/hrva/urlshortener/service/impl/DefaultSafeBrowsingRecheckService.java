@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.SafeBrowsingRecheckService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
 import cc.hrva.urlshortener.service.SettingsService;
+import cc.hrva.urlshortener.service.jobs.JobFailedException;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -41,6 +42,7 @@ public class DefaultSafeBrowsingRecheckService implements SafeBrowsingRecheckSer
     private static final String PERFORMED_BY = "system";
     private static final String VIA = "nightly";
     private static final String THREAT_SEPARATOR = ", ";
+    private static final String SAFE_BROWSING_UNAVAILABLE = "Safe Browsing was unavailable";
 
     private final UrlRepository urlRepository;
     private final SafeBrowsingService safeBrowsingService;
@@ -91,34 +93,34 @@ public class DefaultSafeBrowsingRecheckService implements SafeBrowsingRecheckSer
                 checked, tally.getOrDefault(ScanResult.BLOCKED, 0), tally.getOrDefault(ScanResult.QUEUED, 0), safeBrowsingAvailable.get());
 
         if (!safeBrowsingAvailable.get()) {
-            log.warn("Safe Browsing is unavailable, the redirect checks wait for the next nightly scan");
-            return;
+            throw new JobFailedException(SAFE_BROWSING_UNAVAILABLE + " during the link scan, so links were checked without it and the redirect checks wait for the next night");
         }
-        checkRedirectChains();
+        if (!checkRedirectChains()) {
+            throw new JobFailedException(SAFE_BROWSING_UNAVAILABLE + " during the redirect checks, so the rest wait for the next night");
+        }
     }
 
-    private void checkRedirectChains() {
+    private boolean checkRedirectChains() {
         final var checkedBefore = LocalDateTime.now().minusDays(REDIRECT_CHECK_INTERVAL_DAYS);
         final var ids = urlRepository.findIdsDueForRedirectCheck(checkedBefore, PageRequest.ofSize(REDIRECT_CHECKS_PER_RUN));
         final var followedIds = new HashSet<Long>();
         final var safeBrowsingAvailable = follow(ids, followedIds);
         log.info("Nightly redirect checks complete — {} of {} due links followed", followedIds.size(), ids.size());
-        if (safeBrowsingAvailable) {
-            checkShortenerLinks(Set.copyOf(ids));
-        }
+        return safeBrowsingAvailable && checkShortenerLinks(Set.copyOf(ids));
     }
 
-    private void checkShortenerLinks(final Set<Long> attempted) {
+    private boolean checkShortenerLinks(final Set<Long> attempted) {
         final var checkedBefore = LocalDateTime.now().minusDays(SHORTENER_RECHECK_INTERVAL_DAYS);
         final var ids = urlRepository.findIdsOfShortenerLinksDueForRedirectCheck(checkedBefore, PageRequest.ofSize(SHORTENER_CHECKS_PER_RUN));
         final var leftover = urlRepository.countShortenerLinksDueForRedirectCheck(checkedBefore) - ids.size();
         final var due = ids.stream().filter(id -> !attempted.contains(id)).toList();
         final var followedIds = new HashSet<Long>();
-        follow(due, followedIds);
+        final var safeBrowsingAvailable = follow(due, followedIds);
         log.info("Nightly shortener redirect checks complete — {} of {} due links followed", followedIds.size(), due.size());
         if (leftover > 0) {
             log.info("Nightly shortener redirect checks left {} links for the next night", leftover);
         }
+        return safeBrowsingAvailable;
     }
 
     private boolean follow(final List<Long> ids, final Set<Long> followedIds) {
@@ -144,7 +146,7 @@ public class DefaultSafeBrowsingRecheckService implements SafeBrowsingRecheckSer
             return Optional.of(safeBrowsingService.checkUrlsForThreats(url.getLongUrl()));
         } catch (final RuntimeException exception) {
             safeBrowsingAvailable.set(false);
-            log.warn("Safe Browsing failed, the nightly scan goes on with the link checks only urlId={}", url.getId(), exception);
+            log.warn("Safe Browsing failed, the nightly scan goes on with the link checks only urlId={} reason={}", url.getId(), exception.getMessage());
             return Optional.empty();
         }
     }

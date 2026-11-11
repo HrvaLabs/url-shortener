@@ -4,13 +4,14 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.LinkVerdict.Outcome;
 import cc.hrva.urlshortener.exception.UrlNotFoundException;
-import cc.hrva.urlshortener.exception.UrlValidationException;
+import cc.hrva.urlshortener.exception.SafeBrowsingUnavailableException;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.model.enums.ThreatType;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.impl.DefaultSafeBrowsingRecheckService;
 import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
+import cc.hrva.urlshortener.service.jobs.JobFailedException;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import java.time.LocalDateTime;
@@ -35,6 +36,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyIterable;
@@ -56,7 +58,9 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class DefaultSafeBrowsingRecheckServiceTest {
 
-    private static final String SAFE_BROWSING_DOWN = "URL safety check is temporarily unavailable. Please try again later.";
+    private static final String SAFE_BROWSING_DOWN = "HTTP 503 UNAVAILABLE";
+    private static final String SCAN_FAILED = "Safe Browsing was unavailable during the link scan, so links were checked without it and the redirect checks wait for the next night";
+    private static final String REDIRECTS_FAILED = "Safe Browsing was unavailable during the redirect checks, so the rest wait for the next night";
     private static final List<String> YOUNG_LOOKALIKE = List.of("domain registered in the last 30 days", "imitates njuskalo");
 
     @Mock
@@ -291,12 +295,12 @@ class DefaultSafeBrowsingRecheckServiceTest {
     @Test
     void whenSafeBrowsingIsDownTheListsStillApplyToEveryLinkAndNothingIsStampedAsChecked() {
         final var reasons = List.of("on list Phishing.Database domains");
-        when(safeBrowsingService.checkUrlsForThreats(anyString())).thenThrow(new UrlValidationException(SAFE_BROWSING_DOWN));
+        when(safeBrowsingService.checkUrlsForThreats(anyString())).thenThrow(new SafeBrowsingUnavailableException(SAFE_BROWSING_DOWN));
         verdict(3L, blocked(BlockReason.BLOCKLIST, "URLhaus"));
         verdict(11L, new LinkVerdict(Outcome.FLAG, reasons, null, null));
         verdict(44L, blocked(BlockReason.DOMAIN_RULE, "jofogas.cards"));
 
-        recheckService.recheckActiveUrls();
+        assertThatThrownBy(recheckService::recheckActiveUrls).isInstanceOf(JobFailedException.class).hasMessage(SCAN_FAILED);
 
         verify(safeBrowsingService, times(1)).checkUrlsForThreats(anyString());
         verify(linkCheckService, times(45)).check(anyString());
@@ -310,9 +314,9 @@ class DefaultSafeBrowsingRecheckServiceTest {
 
     @Test
     void safeBrowsingGoingDownMidScanStampsOnlyTheLinksItReallyChecked() {
-        when(safeBrowsingService.checkUrlsForThreats("https://site5.example")).thenThrow(new UrlValidationException(SAFE_BROWSING_DOWN));
+        when(safeBrowsingService.checkUrlsForThreats("https://site5.example")).thenThrow(new SafeBrowsingUnavailableException(SAFE_BROWSING_DOWN));
 
-        recheckService.recheckActiveUrls();
+        assertThatThrownBy(recheckService::recheckActiveUrls).isInstanceOf(JobFailedException.class).hasMessage(SCAN_FAILED);
 
         verify(safeBrowsingService, times(5)).checkUrlsForThreats(anyString());
         verify(linkCheckService, times(45)).check(anyString());
@@ -353,9 +357,9 @@ class DefaultSafeBrowsingRecheckServiceTest {
 
     @Test
     void whenSafeBrowsingFailedDuringTheScanTheRedirectChecksWaitForTheNextNight() {
-        when(safeBrowsingService.checkUrlsForThreats("https://site5.example")).thenThrow(new UrlValidationException(SAFE_BROWSING_DOWN));
+        when(safeBrowsingService.checkUrlsForThreats("https://site5.example")).thenThrow(new SafeBrowsingUnavailableException(SAFE_BROWSING_DOWN));
 
-        recheckService.recheckActiveUrls();
+        assertThatThrownBy(recheckService::recheckActiveUrls).isInstanceOf(JobFailedException.class).hasMessage(SCAN_FAILED);
 
         verify(urlRepository, never()).findIdsDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class));
         verifyNoInteractions(redirectChainService);
@@ -382,7 +386,7 @@ class DefaultSafeBrowsingRecheckServiceTest {
         when(urlRepository.findIdsDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(List.of(1L, 2L, 3L));
         when(redirectChainService.check(2L)).thenReturn(RedirectChainService.Result.SAFE_BROWSING_UNAVAILABLE);
 
-        recheckService.recheckActiveUrls();
+        assertThatThrownBy(recheckService::recheckActiveUrls).isInstanceOf(JobFailedException.class).hasMessage(REDIRECTS_FAILED);
 
         verify(redirectChainService).check(1L);
         verify(redirectChainService).check(2L);
@@ -451,7 +455,7 @@ class DefaultSafeBrowsingRecheckServiceTest {
         when(urlRepository.findIdsDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(List.of(1L, 2L));
         when(redirectChainService.check(2L)).thenReturn(RedirectChainService.Result.SAFE_BROWSING_UNAVAILABLE);
 
-        recheckService.recheckActiveUrls();
+        assertThatThrownBy(recheckService::recheckActiveUrls).isInstanceOf(JobFailedException.class).hasMessage(REDIRECTS_FAILED);
 
         verify(urlRepository, never()).findIdsOfShortenerLinksDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class));
     }
@@ -461,7 +465,7 @@ class DefaultSafeBrowsingRecheckServiceTest {
         when(urlRepository.findIdsOfShortenerLinksDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(List.of(8L, 9L, 10L));
         when(redirectChainService.check(9L)).thenReturn(RedirectChainService.Result.SAFE_BROWSING_UNAVAILABLE);
 
-        recheckService.recheckActiveUrls();
+        assertThatThrownBy(recheckService::recheckActiveUrls).isInstanceOf(JobFailedException.class).hasMessage(REDIRECTS_FAILED);
 
         verify(redirectChainService).check(8L);
         verify(redirectChainService, never()).check(10L);

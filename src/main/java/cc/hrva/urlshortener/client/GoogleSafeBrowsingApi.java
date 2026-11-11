@@ -1,10 +1,13 @@
 package cc.hrva.urlshortener.client;
 
 import cc.hrva.urlshortener.configuration.properties.GoogleApiProperties;
+import com.google.api.client.http.HttpMediaType;
+import com.google.api.client.http.HttpStatusCodes;
 import com.google.api.services.safebrowsing.v5.Safebrowsing;
-import com.google.api.services.safebrowsing.v5.model.GoogleSecuritySafebrowsingV5SearchUrlsResponse;
-import com.google.api.services.safebrowsing.v5.model.GoogleSecuritySafebrowsingV5ThreatUrl;
+import com.google.protobuf.CodedInputStream;
+import com.google.protobuf.WireFormat;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -13,28 +16,56 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class GoogleSafeBrowsingApi {
 
+    private static final String PROTOBUF = "application/x-protobuf";
+    private static final int TAG_TYPE_BITS = 3;
+    private static final int THREATS_TAG = 1 << TAG_TYPE_BITS | WireFormat.WIRETYPE_LENGTH_DELIMITED;
+    private static final int URL_TAG = 1 << TAG_TYPE_BITS | WireFormat.WIRETYPE_LENGTH_DELIMITED;
+
     private final GoogleApiProperties googleApiProperties;
+    private final Safebrowsing safebrowsing;
 
-    public Safebrowsing.Urls.Search createUrlSearchRequest(final Safebrowsing safebrowsing, final List<String> urls) throws IOException {
-        return safebrowsing.urls()
+    public List<String> threatUrls(final List<String> urls) throws IOException {
+        final var response = safebrowsing.urls()
                 .search()
-                .setUrls(urls);
-    }
-
-    public GoogleSecuritySafebrowsingV5SearchUrlsResponse executeSearch(final Safebrowsing.Urls.Search search) throws IOException {
-        return search
+                .setUrls(urls)
                 .setKey(googleApiProperties.getKey())
-                .execute();
+                .executeUnparsed();
+        try {
+            if (response.getStatusCode() != HttpStatusCodes.STATUS_CODE_OK) {
+                throw new IOException("Safe Browsing answered HTTP " + response.getStatusCode());
+            }
+            if (response.getContentType() == null || !HttpMediaType.equalsIgnoreParameters(response.getContentType(), PROTOBUF)) {
+                throw new IOException("Safe Browsing answered with content type " + response.getContentType());
+            }
+            final var content = response.getContent();
+            return content == null ? List.of() : threatUrlsOf(CodedInputStream.newInstance(content));
+        } finally {
+            response.disconnect();
+        }
     }
 
-    public List<String> extractThreatUrls(final GoogleSecuritySafebrowsingV5SearchUrlsResponse response) {
-        if (response == null || response.getThreats() == null) {
-            return List.of();
+    private static List<String> threatUrlsOf(final CodedInputStream answer) throws IOException {
+        final var urls = new ArrayList<String>();
+        for (var tag = answer.readTag(); tag != 0; tag = answer.readTag()) {
+            if (tag == THREATS_TAG) {
+                urls.add(urlOf(answer.readBytes().newCodedInput()));
+            } else {
+                answer.skipField(tag);
+            }
         }
+        return List.copyOf(urls);
+    }
 
-        return response.getThreats().stream()
-                .map(GoogleSecuritySafebrowsingV5ThreatUrl::getUrl)
-                .toList();
+    private static String urlOf(final CodedInputStream threat) throws IOException {
+        var url = "";
+        for (var tag = threat.readTag(); tag != 0; tag = threat.readTag()) {
+            if (tag == URL_TAG) {
+                url = threat.readString();
+            } else {
+                threat.skipField(tag);
+            }
+        }
+        return url;
     }
 
 }

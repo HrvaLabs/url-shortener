@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.client.RedirectFollower;
 import cc.hrva.urlshortener.client.RedirectHop;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.LinkVerdict.Outcome;
+import cc.hrva.urlshortener.exception.SafeBrowsingUnavailableException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.BlockReason;
@@ -270,7 +271,7 @@ class DefaultRedirectChainServiceTest {
     void whenSafeBrowsingIsDownTheHopsAreStillCheckedButTheChainStaysDueForTheNextScan(final CapturedOutput output) {
         chain(DESTINATION, PHISHING);
         when(safeBrowsingService.checkUrlsForThreats(List.of(PHISHING)))
-                .thenThrow(new UrlValidationException("URL safety check is temporarily unavailable. Please try again later."));
+                .thenThrow(new SafeBrowsingUnavailableException("HTTP 503 UNAVAILABLE"));
         when(linkCheckService.check(PHISHING)).thenReturn(blocked(BlockReason.BLOCKLIST, "URLhaus"));
 
         final var result = redirectChainService.check(LINK_ID);
