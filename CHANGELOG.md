@@ -4,6 +4,18 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.35.1] — 2026-11-11
+
+Google Safe Browsing checks work again.
+
+### 🐛 Fixes
+- Google Safe Browsing checks work again. Since May, hrva.cc couldn't read Google's answers, so new links and the nightly scan went ahead without that check. The blocklists and the other link checks still ran. The first night after this update, every active link is checked against Safe Browsing again.
+
+### 🔧 Admin
+- When Google Safe Browsing can't be reached, the nightly scan now shows as failed on the Health page, and links are marked as checked only when Safe Browsing really answered for them.
+
+---
+
 ## [v2.35] — 2026-11-10
 
 Your links and analytics update every 10 seconds while you watch.

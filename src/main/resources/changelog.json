@@ -1,10 +1,31 @@
 {
   "releases": [
     {
-      "version": "v2.35",
-      "date": "2026-11-10",
+      "version": "v2.35.1",
+      "date": "2026-11-11",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "Google Safe Browsing checks work again.",
+      "sections": [
+        {
+          "title": "Fixes",
+          "icon": "bug",
+          "items": [
+            "Google Safe Browsing checks work again. Since May, hrva.cc couldn't read Google's answers, so new links and the nightly scan went ahead without that check. The blocklists and the other link checks still ran. The first night after this update, every active link is checked against Safe Browsing again."
+          ]
+        },
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "When Google Safe Browsing can't be reached, the nightly scan now shows as failed on the Health page, and links are marked as checked only when Safe Browsing really answered for them."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.35",
+      "date": "2026-11-10",
       "summary": "Your links and analytics update every 10 seconds while you watch.",
       "sections": [
         {
