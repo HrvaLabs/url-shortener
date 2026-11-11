@@ -28,7 +28,7 @@
         <googleApiClientVersion>2.9.2</googleApiClientVersion>
         <googleApiServicesSafebrowsingVersion>v5-rev20251214-2.9.2</googleApiServicesSafebrowsingVersion>
         <zxingVersion>3.5.4</zxingVersion>
-        <jsoupVersion>1.23.2</jsoupVersion>
+        <jsoupVersion>1.24.1</jsoupVersion>
         <guavaVersion>33.7.2-jre</guavaVersion>
         <springAiVersion>2.0.2</springAiVersion>
         <mcpSdkVersion>2.1.0</mcpSdkVersion>
