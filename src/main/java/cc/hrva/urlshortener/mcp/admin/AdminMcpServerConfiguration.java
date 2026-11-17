@@ -49,7 +49,13 @@ public class AdminMcpServerConfiguration {
     private final ShortLinks shortLinks;
 
     @Bean
-    public RouterFunction<ServerResponse> adminMcpRouterFunction(@Qualifier("mcpServerJsonMapper") final JsonMapper jsonMapper) {
+    public AdminMcpTools adminMcpTools() {
+        return new AdminMcpTools(SyncMcpAnnotationProviders.statelessToolSpecifications(List.of(moderationTools())));
+    }
+
+    @Bean
+    public RouterFunction<ServerResponse> adminMcpRouterFunction(@Qualifier("mcpServerJsonMapper") final JsonMapper jsonMapper,
+                                                                 final AdminMcpTools adminMcpTools) {
         final var transport = WebMvcStatelessServerTransport.builder()
                 .jsonMapper(new JacksonMcpJsonMapper(jsonMapper))
                 .messageEndpoint(ENDPOINT)
@@ -58,7 +64,7 @@ public class AdminMcpServerConfiguration {
         McpServer.sync(transport)
                 .serverInfo(serverProperties.getName(), serverProperties.getVersion())
                 .capabilities(capabilities())
-                .tools(SyncMcpAnnotationProviders.statelessToolSpecifications(List.of(moderationTools())))
+                .tools(adminMcpTools.specifications())
                 .instructions(serverProperties.getInstructions())
                 .requestTimeout(serverProperties.getRequestTimeout())
                 .immediateExecution(true)
