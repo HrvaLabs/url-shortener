@@ -13,8 +13,10 @@ import cc.hrva.urlshortener.dto.UrlAnalyticsDto;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto.Breakdowns;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto.LinkSummary;
 import cc.hrva.urlshortener.dto.UrlResponse;
+import cc.hrva.urlshortener.mcp.admin.AdminMcpServerConfiguration;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
+import cc.hrva.urlshortener.mcp.modern.ModernMcpServers;
 import cc.hrva.urlshortener.mcp.tools.LinkTools;
 import cc.hrva.urlshortener.mcp.tools.McpUserResolver;
 import cc.hrva.urlshortener.model.User;
@@ -30,20 +32,33 @@ import cc.hrva.urlshortener.security.OAuth2LoginSuccessHandler;
 import cc.hrva.urlshortener.security.OAuth2LoginUserService;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.AnalyticsService;
+import cc.hrva.urlshortener.service.BlocklistSourceService;
+import cc.hrva.urlshortener.service.LinkCheckService;
+import cc.hrva.urlshortener.service.ModerationService;
+import cc.hrva.urlshortener.service.ReviewQueueService;
+import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
+import cc.hrva.urlshortener.service.settings.DefaultSettingsTestConfiguration;
+import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import com.jayway.jsonpath.JsonPath;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import java.io.ByteArrayInputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
@@ -92,6 +107,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import org.springframework.web.servlet.view.RedirectView;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
@@ -156,6 +172,22 @@ class McpEndpointSecurityTest {
             {"jsonrpc":"2.0","id":8,"method":"resources/templates/list","params":{}}""";
     private static final String PROMPTS_LIST = """
             {"jsonrpc":"2.0","id":9,"method":"prompts/list","params":{}}""";
+    private static final String MODERN_VERSION = "2026-07-28";
+    private static final String PROTOCOL_VERSION_HEADER = "MCP-Protocol-Version";
+    private static final String METHOD_HEADER = "Mcp-Method";
+    private static final String NAME_HEADER = "Mcp-Name";
+    private static final String SERVER_DISCOVER = "server/discover";
+    private static final String MCP_REQUESTS = "hrva.mcp.requests";
+    private static final String MODERN_DISCOVER = """
+            {"jsonrpc":"2.0","id":21,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}""";
+    private static final String MODERN_TOOLS_LIST = """
+            {"jsonrpc":"2.0","id":22,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}""";
+    private static final String MODERN_LIST_LINKS_CALL = """
+            {"jsonrpc":"2.0","id":23,"method":"tools/call","params":{"name":"list_links","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}""";
+    private static final String MODERN_MISSING_LINK_STATS_CALL = """
+            {"jsonrpc":"2.0","id":24,"method":"tools/call","params":{"name":"link_stats","arguments":{"link":"https://hrva.cc/missing"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}""";
+    private static final String LEGACY_DISCOVER_ANSWER = """
+            {"jsonrpc":"2.0","id":null,"error":{"code":-32601,"message":"Method not found: server/discover. This server implements MCP 2025-11-25; send initialize."}}""";
     private static final String GENERIC_TOOL_ERROR = "Something went wrong on hrva.cc. Try again in a moment.";
     private static final String INFRASTRUCTURE_HOST = "db.internal.example:5432";
     private static final RSAKey SIGNING_KEY = generateSigningKey();
@@ -210,6 +242,27 @@ class McpEndpointSecurityTest {
 
     @MockitoBean
     private LinkReviewRepository linkReviewRepository;
+
+    @MockitoBean
+    private ModerationService moderationService;
+
+    @MockitoBean
+    private ReviewQueueService reviewQueueService;
+
+    @MockitoBean
+    private ScammerSignalService scammerSignalService;
+
+    @MockitoBean
+    private LinkCheckService linkCheckService;
+
+    @MockitoBean
+    private BlocklistSourceService blocklistSourceService;
+
+    @Autowired
+    private SettingsService settingsService;
+
+    @Autowired
+    private MeterRegistry meterRegistry;
 
     private McpAccessTokens accessTokens;
 
@@ -489,17 +542,182 @@ class McpEndpointSecurityTest {
     }
 
     @Test
-    void modernDiscoveryProbeIsChallengedThenAnsweredAsALegacyServer() throws Exception {
-        mockMvc.perform(modernDiscoveryProbe())
-                .andExpect(status().isUnauthorized());
+    void modernRequestWithoutTokenIsChallenged() throws Exception {
+        final var countedBefore = allRequests();
 
+        mockMvc.perform(modernRequest(SERVER_DISCOVER, MODERN_DISCOVER))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, containsString("resource_metadata=\"" + RESOURCE_METADATA + "\"")));
+
+        assertThat(allRequests()).isEqualTo(countedBefore);
+        verifyNoInteractions(urlService, userService);
+    }
+
+    @Test
+    void modernDiscoverAnswers() throws Exception {
         final var token = accessTokens.issue(EMAIL, RESOURCE);
-        mockMvc.perform(modernDiscoveryProbe().header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error.code").value(-32601));
-        mockMvc.perform(mcpRequest(INITIALIZE).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+
+        mockMvc.perform(modernRequest(SERVER_DISCOVER, MODERN_DISCOVER).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.supportedVersions", contains(MODERN_VERSION)))
+                .andExpect(jsonPath("$.result._meta['io.modelcontextprotocol/serverInfo'].name").value("hrva.cc"));
+    }
+
+    @Test
+    void modernToolsCallListsTheUsersLinks() throws Exception {
+        final var token = accessTokens.issue(EMAIL, RESOURCE);
+        final var callerDuringLookup = new AtomicReference<String>();
+        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).twoStepEnabled(true).build());
+        when(urlService.getAllMyUrls(isNull(), any(), any())).thenAnswer(invocation -> {
+            callerDuringLookup.set(SecurityContextHolder.getContext().getAuthentication().getName());
+            return new PageImpl<>(List.of(link("abc12", "https://example.com/a")));
+        });
+
+        mockMvc.perform(modernToolCall("list_links", MODERN_LIST_LINKS_CALL).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.resultType").value("complete"))
+                .andExpect(jsonPath("$.result.isError").value(false))
+                .andExpect(jsonPath("$.result.content[0].text", containsString(ISSUER + "/abc12")));
+
+        assertThat(callerDuringLookup.get()).isEqualTo(EMAIL);
+    }
+
+    @Test
+    void modernToolErrorIsAToolResult() throws Exception {
+        final var token = accessTokens.issue(EMAIL, RESOURCE);
+        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(User.builder().id(7L).email(EMAIL).active(true).twoStepEnabled(true).build());
+        when(urlService.getAllMyUrls(isNull(), any(), any())).thenReturn(new PageImpl<>(List.of()));
+
+        mockMvc.perform(modernToolCall("link_stats", MODERN_MISSING_LINK_STATS_CALL).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.resultType").value("complete"))
+                .andExpect(jsonPath("$.result.isError").value(true))
+                .andExpect(jsonPath("$.result.content[0].text", containsString("/missing in your account.")));
+
+        verify(analyticsService, never()).getUrlAnalyticsForOwner(any(), any());
+    }
+
+    @Test
+    void legacyHeaderWithModernBodyIsCorrected(final CapturedOutput output) throws Exception {
+        final var token = accessTokens.issue(EMAIL, RESOURCE);
+        final var correctedBefore = requests("modern", "corrected");
+        final var outputBeforeCall = output.length();
+
+        mockMvc.perform(mcpRequest(MODERN_TOOLS_LIST)
+                        .header(PROTOCOL_VERSION_HEADER, "2025-11-25")
+                        .header(METHOD_HEADER, "tools/list")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.error").doesNotExist())
+                .andExpect(jsonPath("$.result.tools[*].name", containsInAnyOrder("list_links", "shorten_url", "link_stats")))
+                .andExpect(jsonPath("$.result.ttlMs").value(300_000));
+
+        assertThat(requests("modern", "corrected")).isEqualTo(correctedBefore + 1);
+        assertThat(output.toString().substring(outputBeforeCall))
+                .contains("Corrected an MCP-Protocol-Version header on /mcp: 2025-11-25 -> 2026-07-28");
+    }
+
+    @Test
+    void initializeWithModernHeadersStillWorks() throws Exception {
+        final var token = accessTokens.issue(EMAIL, RESOURCE);
+
+        mockMvc.perform(mcpRequest(INITIALIZE)
+                        .header(PROTOCOL_VERSION_HEADER, MODERN_VERSION)
+                        .header(METHOD_HEADER, "initialize")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.serverInfo.name").value("hrva.cc"))
+                .andExpect(jsonPath("$.result.protocolVersion").isString())
+                .andExpect(jsonPath("$.result.supportedVersions").doesNotExist());
+    }
+
+    @Test
+    void originIsTreatedTheSameInBothEras() throws Exception {
+        final var token = accessTokens.issue(EMAIL, RESOURCE);
+
+        final var legacy = mockMvc.perform(mcpRequest(INITIALIZE)
+                        .header(HttpHeaders.ORIGIN, "https://claude.ai")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andReturn()
+                .getResponse();
+        final var modern = mockMvc.perform(modernRequest(SERVER_DISCOVER, MODERN_DISCOVER)
+                        .header(HttpHeaders.ORIGIN, "https://claude.ai")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andReturn()
+                .getResponse();
+
+        assertThat(modern.getStatus()).isEqualTo(legacy.getStatus()).isEqualTo(403);
+        assertThat(modern.getContentAsString()).isEqualTo(legacy.getContentAsString()).isEqualTo("Invalid CORS request");
+
+        mockMvc.perform(mcpRequest(INITIALIZE)
+                        .header(HttpHeaders.ORIGIN, "http://localhost:3000")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.serverInfo.name").value("hrva.cc"));
+        mockMvc.perform(modernRequest(SERVER_DISCOVER, MODERN_DISCOVER)
+                        .header(HttpHeaders.ORIGIN, "http://localhost:3000")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.supportedVersions", contains(MODERN_VERSION)));
+    }
+
+    @Test
+    void killSwitchTakesEffectWithoutRestart() throws Exception {
+        final var token = accessTokens.issue(EMAIL, RESOURCE);
+
+        try {
+            SettingsServiceFixtures.turnOff(settingsService, SettingKey.MCP_MODERN);
+
+            mockMvc.perform(modernRequest(SERVER_DISCOVER, MODERN_DISCOVER).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(content().contentTypeCompatibleWith(APPLICATION_JSON))
+                    .andExpect(content().string(LEGACY_DISCOVER_ANSWER));
+            mockMvc.perform(modernRequest("tools/list", MODERN_TOOLS_LIST).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.result.tools[*].name", containsInAnyOrder("list_links", "shorten_url", "link_stats")))
+                    .andExpect(jsonPath("$.result.ttlMs").doesNotExist());
+        } finally {
+            SettingsServiceFixtures.turnOn(settingsService, SettingKey.MCP_MODERN);
+        }
+
+        mockMvc.perform(modernRequest(SERVER_DISCOVER, MODERN_DISCOVER).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.supportedVersions", contains(MODERN_VERSION)));
+    }
+
+    @Test
+    void eraCounterCountsBothEras() throws Exception {
+        final var token = accessTokens.issue(EMAIL, RESOURCE);
+        final var modernBefore = requests("modern", "ok");
+        final var legacyBefore = requests("legacy", "ok");
+
+        mockMvc.perform(modernRequest(SERVER_DISCOVER, MODERN_DISCOVER).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(mcpRequest(TOOLS_LIST).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk());
+
+        assertThat(requests("modern", "ok")).isEqualTo(modernBefore + 1);
+        assertThat(requests("legacy", "ok")).isEqualTo(legacyBefore + 1);
+    }
+
+    @Test
+    void oversizedBodyWithATokenIsStill413() throws Exception {
+        final var token = accessTokens.issue(EMAIL, RESOURCE);
+        final var oversized = ("{\"pad\":\"" + "x".repeat(McpRequestBodyLimitFilter.MAX_BODY_BYTES) + "\"}").getBytes(StandardCharsets.UTF_8);
+
+        try (final var httpClient = HttpClient.newHttpClient()) {
+            final var response = httpClient.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/mcp"))
+                    .header(HttpHeaders.ACCEPT, MCP_ACCEPT)
+                    .header(HttpHeaders.CONTENT_TYPE, APPLICATION_JSON_VALUE)
+                    .header(PROTOCOL_VERSION_HEADER, MODERN_VERSION)
+                    .header(METHOD_HEADER, "tools/list")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                    .POST(HttpRequest.BodyPublishers.ofInputStream(() -> new ByteArrayInputStream(oversized)))
+                    .build(), HttpResponse.BodyHandlers.ofString());
+
+            assertThat(response.statusCode()).isEqualTo(413);
+            assertThat(response.body()).contains("The request body is over 64 KB.");
+        }
     }
 
     @Test
@@ -604,11 +822,22 @@ class McpEndpointSecurityTest {
         return jwt.getTokenValue();
     }
 
-    private static MockHttpServletRequestBuilder modernDiscoveryProbe() {
-        return mcpRequest("""
-                {"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}""")
-                .header("MCP-Protocol-Version", "2026-07-28")
-                .header("Mcp-Method", "server/discover");
+    private double requests(final String era, final String header) {
+        return meterRegistry.get(MCP_REQUESTS).tags("endpoint", "/mcp", "era", era, "header", header).counter().count();
+    }
+
+    private double allRequests() {
+        return meterRegistry.find(MCP_REQUESTS).counters().stream().mapToDouble(Counter::count).sum();
+    }
+
+    private static MockHttpServletRequestBuilder modernRequest(final String method, final String body) {
+        return mcpRequest(body)
+                .header(PROTOCOL_VERSION_HEADER, MODERN_VERSION)
+                .header(METHOD_HEADER, method);
+    }
+
+    private static MockHttpServletRequestBuilder modernToolCall(final String tool, final String body) {
+        return modernRequest("tools/call", body).header(NAME_HEADER, tool);
     }
 
     private static Map<String, List<String>> headersWithout(final Map<String, List<String>> headers, final String excluded) {
@@ -655,7 +884,11 @@ class McpEndpointSecurityTest {
             ClockConfiguration.class,
             McpUserResolver.class,
             LinkTools.class,
-            ShortLinks.class
+            ShortLinks.class,
+            AdminMcpServerConfiguration.class,
+            ModernMcpServers.class,
+            McpEraFilterConfiguration.class,
+            DefaultSettingsTestConfiguration.class
     })
     static class TestApplication {
     }

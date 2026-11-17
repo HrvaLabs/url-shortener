@@ -281,7 +281,7 @@ class SettingValuesTest {
                 .containsExactly(SettingGroup.SAFETY, SettingType.SWITCH, "Screenshots of links in review",
                         "Cloudflare opens each link that enters the review queue and takes one phone-sized screenshot. The nightly cleanup deletes "
                                 + "a screenshot once it's 7 days old. Needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_BROWSER_API_TOKEN on the server.", null, true);
-        assertThat(SettingKey.values()[SettingKey.values().length - 6]).isEqualTo(SettingKey.LINK_SCREENSHOTS);
+        assertThat(SettingKey.values()[SettingKey.values().length - 7]).isEqualTo(SettingKey.LINK_SCREENSHOTS);
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
         assertThat(defaults.defaultOf(SettingKey.LINK_SCREENSHOTS)).isEqualTo(true);
@@ -302,7 +302,7 @@ class SettingValuesTest {
                 .containsExactly(SettingGroup.SAFETY, SettingType.SWITCH, "VirusTotal lookups for links in review",
                         "Looks up VirusTotal's existing report for each link that enters the review queue. Never sends a link to VirusTotal on its own. "
                                 + "Needs VIRUSTOTAL_API_KEY on the server.", null, true);
-        assertThat(SettingKey.values()[SettingKey.values().length - 5]).isEqualTo(SettingKey.VIRUSTOTAL_LOOKUPS);
+        assertThat(SettingKey.values()[SettingKey.values().length - 6]).isEqualTo(SettingKey.VIRUSTOTAL_LOOKUPS);
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
         assertThat(defaults.defaultOf(SettingKey.VIRUSTOTAL_LOOKUPS)).isEqualTo(true);
@@ -364,7 +364,7 @@ class SettingValuesTest {
                 .containsExactly(SettingGroup.SAFETY, SettingType.NUMBER, "Real sign-in pages: top sites",
                         "How many of the most-visited hosts in Tranco's list with subdomains count as real sign-in pages. The next refresh of the "
                                 + "Tranco source downloads that many.", null, false, 1000, 100_000, "sites", false);
-        assertThat(SettingKey.values()[SettingKey.values().length - 2]).isEqualTo(SettingKey.SIGN_IN_FORM_TOP_SITES);
+        assertThat(SettingKey.values()[SettingKey.values().length - 3]).isEqualTo(SettingKey.SIGN_IN_FORM_TOP_SITES);
         assertThat(SettingValues.format(SettingKey.SIGN_IN_FORM_TOP_SITES, 20_000)).isEqualTo("20,000 sites");
         assertRefused(SettingKey.SIGN_IN_FORM_TOP_SITES, NODES.numberNode(999), "Use a number from 1,000 to 100,000.");
         final var appProperties = new AppProperties();
@@ -406,7 +406,7 @@ class SettingValuesTest {
         assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.HUMAN_CHECK.ordinal() + 1, SettingKey.values().length))
                 .containsExactly(SettingKey.ANONYMOUS_EXPIRY_DAYS, SettingKey.ANONYMOUS_VISIT_LIMIT, SettingKey.API_KEY_REQUESTS_PER_HOUR,
                         SettingKey.LINK_SCREENSHOTS, SettingKey.VIRUSTOTAL_LOOKUPS, SettingKey.SIGN_IN_FORM_ACCOUNT_LINKS,
-                        SettingKey.SIGN_IN_FORM_NEW_ACCOUNT_DAYS, SettingKey.SIGN_IN_FORM_TOP_SITES, SettingKey.BRAND_SITES_TOP_SITES);
+                        SettingKey.SIGN_IN_FORM_NEW_ACCOUNT_DAYS, SettingKey.SIGN_IN_FORM_TOP_SITES, SettingKey.BRAND_SITES_TOP_SITES, SettingKey.MCP_MODERN);
         final var appProperties = new AppProperties();
         final var defaults = new SettingDefaults(appProperties, SettingsServiceFixtures.bothProviders());
         assertThat(defaults.defaultOf(SettingKey.ANONYMOUS_EXPIRY_DAYS)).isNull();
@@ -533,6 +533,16 @@ class SettingValuesTest {
                         "Shown as plain text at hrva.cc/.well-known/openai-apps-challenge while OpenAI checks the domain. Empty answers 404.", null, 0, 200);
         assertThat(SettingGroup.APP_DIRECTORIES.getLabel()).isEqualTo("App directories");
         assertThat(new SettingDefaults(new AppProperties(), SettingsServiceFixtures.bothProviders()).defaultOf(SettingKey.OPENAI_APPS_CHALLENGE)).isEqualTo("");
+    }
+
+    @Test
+    void theMcpModernRow() {
+        assertThat(SettingKey.MCP_MODERN).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
+                        SettingKey::getParent, SettingKey::isSafety)
+                .containsExactly(SettingGroup.ACCESS, SettingType.SWITCH, "AI apps on MCP 2026-07-28", "Off: AI apps use MCP 2025-11-25 only, as before "
+                        + "v2.37. Turn it off only if an AI app can't call hrva.cc tools.", null, false);
+        assertThat(SettingKey.values()[SettingKey.values().length - 1]).isEqualTo(SettingKey.MCP_MODERN);
+        assertThat(new SettingDefaults(new AppProperties(), SettingsServiceFixtures.bothProviders()).defaultOf(SettingKey.MCP_MODERN)).isEqualTo(true);
     }
 
     @Test

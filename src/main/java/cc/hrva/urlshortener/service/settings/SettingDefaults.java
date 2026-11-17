@@ -86,6 +86,7 @@ public class SettingDefaults {
         register(SettingKey.SIGN_IN_FORM_NEW_ACCOUNT_DAYS, moderation::getSignInFormNewAccountDays);
         register(SettingKey.SIGN_IN_FORM_TOP_SITES, moderation::getSignInFormTopSites);
         register(SettingKey.BRAND_SITES_TOP_SITES, moderation::getBrandSitesTopSites);
+        register(SettingKey.MCP_MODERN, () -> true);
         registerAvailability(SettingKey.GOOGLE_SIGN_IN,
                 () -> unavailableUnless(oAuthProviders.configured(OAuthProviders.GOOGLE), GOOGLE_NOT_CONFIGURED));
         registerAvailability(SettingKey.GITHUB_SIGN_IN,

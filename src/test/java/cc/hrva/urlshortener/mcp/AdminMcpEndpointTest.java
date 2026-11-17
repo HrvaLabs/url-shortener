@@ -9,6 +9,7 @@ import cc.hrva.urlshortener.configuration.WebConfiguration;
 import cc.hrva.urlshortener.mcp.admin.AdminMcpServerConfiguration;
 import cc.hrva.urlshortener.mcp.authorization.AuthorizationServerConfiguration;
 import cc.hrva.urlshortener.mcp.bridge.ConnectRequestStore;
+import cc.hrva.urlshortener.mcp.modern.ModernMcpServers;
 import cc.hrva.urlshortener.mcp.tools.LinkTools;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
@@ -26,14 +27,19 @@ import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
+import cc.hrva.urlshortener.service.settings.DefaultSettingsTestConfiguration;
+import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
 import com.jayway.jsonpath.JsonPath;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -62,6 +68,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
@@ -115,6 +122,20 @@ class AdminMcpEndpointTest {
             {"jsonrpc":"2.0","id":9,"method":"prompts/list","params":{}}""";
     private static final String BLOCK_DOMAIN_CALL = """
             {"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"block_domain","arguments":{"domain":"jofogas.cards","reason":"lookalike"}}}""";
+    private static final String MODERN_VERSION = "2026-07-28";
+    private static final String PROTOCOL_VERSION_HEADER = "MCP-Protocol-Version";
+    private static final String METHOD_HEADER = "Mcp-Method";
+    private static final String NAME_HEADER = "Mcp-Name";
+    private static final String SERVER_DISCOVER = "server/discover";
+    private static final String MCP_REQUESTS = "hrva.mcp.requests";
+    private static final String MODERN_DISCOVER = """
+            {"jsonrpc":"2.0","id":21,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}""";
+    private static final String MODERN_TOOLS_LIST = """
+            {"jsonrpc":"2.0","id":22,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}""";
+    private static final String MODERN_BLOCK_DOMAIN_CALL = """
+            {"jsonrpc":"2.0","id":23,"method":"tools/call","params":{"name":"block_domain","arguments":{"domain":"jofogas.cards","reason":"lookalike"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}""";
+    private static final String LEGACY_DISCOVER_ANSWER = """
+            {"jsonrpc":"2.0","id":null,"error":{"code":-32601,"message":"Method not found: server/discover. This server implements MCP 2025-11-25; send initialize."}}""";
     private static final RSAKey SIGNING_KEY = generateSigningKey();
 
     @Autowired
@@ -170,6 +191,12 @@ class AdminMcpEndpointTest {
 
     @MockitoBean
     private LinkReviewRepository linkReviewRepository;
+
+    @Autowired
+    private SettingsService settingsService;
+
+    @Autowired
+    private MeterRegistry meterRegistry;
 
     private McpAccessTokens accessTokens;
 
@@ -258,9 +285,10 @@ class AdminMcpEndpointTest {
         mockMvc.perform(mcpRequest("/mcp/admin", PROMPTS_LIST).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.prompts").isEmpty());
-        mockMvc.perform(modernDiscoveryProbe().header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error.code").value(-32601));
+        mockMvc.perform(modernRequest("/mcp/admin", SERVER_DISCOVER, MODERN_DISCOVER).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.supportedVersions", contains(MODERN_VERSION)))
+                .andExpect(jsonPath("$.result.instructions").value("Test instructions for both servers."));
         mockMvc.perform(get("/mcp/admin").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isMethodNotAllowed());
         mockMvc.perform(mcpRequest("/mcp/admin", "x".repeat(McpRequestBodyLimitFilter.MAX_BODY_BYTES + 1)))
@@ -363,6 +391,115 @@ class AdminMcpEndpointTest {
     }
 
     @Test
+    void modernAdminRequestWithoutATokenPointsAtItsOwnMetadata() throws Exception {
+        mockMvc.perform(modernRequest("/mcp/admin", "tools/list", MODERN_TOOLS_LIST))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, "Bearer resource_metadata=\"" + ADMIN_RESOURCE_METADATA + "\""));
+
+        verifyNoInteractions(userRepository, userService, moderationService);
+    }
+
+    @Test
+    void modernNonAdminIsForbidden(final CapturedOutput output) throws Exception {
+        final var user = User.builder().id(7L).email(USER_EMAIL).active(true).twoStepEnabled(true).build();
+        signedIn(user);
+        final var token = accessTokens.issue(USER_EMAIL, ADMIN_RESOURCE);
+
+        final var outputBeforeCall = output.length();
+        mockMvc.perform(modernRequest("/mcp/admin", "tools/list", MODERN_TOOLS_LIST).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isForbidden())
+                .andExpect(content().string(not(containsString("block_domain"))));
+        mockMvc.perform(modernToolCall("/mcp/admin", "block_domain", MODERN_BLOCK_DOMAIN_CALL).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isForbidden());
+
+        assertThat(output.toString().substring(outputBeforeCall))
+                .contains("MCP admin endpoint refused a non-admin userId=7")
+                .doesNotContain(USER_EMAIL);
+        verifyNoInteractions(moderationService, reviewQueueService, urlRepository);
+    }
+
+    @Test
+    void moderationToolsOnlyOnAdmin() throws Exception {
+        signedIn(admin(true));
+        final var mcpToken = accessTokens.issue(ADMIN_EMAIL, MCP_RESOURCE);
+        final var adminToken = accessTokens.issue(ADMIN_EMAIL, ADMIN_RESOURCE);
+
+        final var mcpBody = mockMvc.perform(modernRequest("/mcp", "tools/list", MODERN_TOOLS_LIST).header(HttpHeaders.AUTHORIZATION, "Bearer " + mcpToken))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        final var adminBody = mockMvc.perform(modernRequest("/mcp/admin", "tools/list", MODERN_TOOLS_LIST)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(JsonPath.<List<String>>read(mcpBody, "$.result.tools[*].name"))
+                .containsExactlyInAnyOrder("link_stats", "list_links", "shorten_url")
+                .doesNotContainAnyElementsOf(MODERATION_TOOLS);
+        assertThat(JsonPath.<List<String>>read(adminBody, "$.result.tools[*].name")).containsExactlyInAnyOrderElementsOf(MODERATION_TOOLS);
+    }
+
+    @Test
+    void anAdminBlocksADomainOverModernMcpAsTheTokenSubject() throws Exception {
+        signedIn(admin(true));
+        final var token = accessTokens.issue(ADMIN_EMAIL, ADMIN_RESOURCE);
+        final var callerDuringBlock = new AtomicReference<String>();
+        when(urlRepository.findFlaggedOrBlockedDestinationsMentioning("jofogas.cards", "jofogas.cards"))
+                .thenReturn(List.of("https://login.jofogas.cards/pay"));
+        when(moderationService.blockDomain("jofogas.cards", "lookalike", ADMIN_EMAIL, "mcp", 50)).thenAnswer(invocation -> {
+            callerDuringBlock.set(SecurityContextHolder.getContext().getAuthentication().getName());
+            return 2;
+        });
+
+        mockMvc.perform(modernToolCall("/mcp/admin", "block_domain", MODERN_BLOCK_DOMAIN_CALL).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.resultType").value("complete"))
+                .andExpect(jsonPath("$.result.isError").value(false))
+                .andExpect(jsonPath("$.result.content[0].text").value("Blocked jofogas.cards and its subdomains. Links blocked now: 2."));
+
+        assertThat(callerDuringBlock.get()).isEqualTo(ADMIN_EMAIL);
+    }
+
+    @Test
+    void eraCounterCountsTheAdminEndpoint() throws Exception {
+        signedIn(admin(true));
+        final var token = accessTokens.issue(ADMIN_EMAIL, ADMIN_RESOURCE);
+        final var modernBefore = adminRequests("modern");
+        final var legacyBefore = adminRequests("legacy");
+
+        mockMvc.perform(modernRequest("/mcp/admin", SERVER_DISCOVER, MODERN_DISCOVER).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk());
+        mockMvc.perform(mcpRequest("/mcp/admin", TOOLS_LIST).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk());
+
+        assertThat(adminRequests("modern")).isEqualTo(modernBefore + 1);
+        assertThat(adminRequests("legacy")).isEqualTo(legacyBefore + 1);
+    }
+
+    @Test
+    void killSwitchCoversTheAdminEndpoint() throws Exception {
+        signedIn(admin(true));
+        final var token = accessTokens.issue(ADMIN_EMAIL, ADMIN_RESOURCE);
+
+        try {
+            SettingsServiceFixtures.turnOff(settingsService, SettingKey.MCP_MODERN);
+
+            mockMvc.perform(modernRequest("/mcp/admin", SERVER_DISCOVER, MODERN_DISCOVER).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(content().string(LEGACY_DISCOVER_ANSWER));
+        } finally {
+            SettingsServiceFixtures.turnOn(settingsService, SettingKey.MCP_MODERN);
+        }
+
+        mockMvc.perform(modernRequest("/mcp/admin", SERVER_DISCOVER, MODERN_DISCOVER).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.supportedVersions", contains(MODERN_VERSION)));
+    }
+
+    @Test
     void adminEndpointWithoutATokenPointsAtItsOwnMetadata() throws Exception {
         mockMvc.perform(mcpRequest("/mcp/admin", TOOLS_LIST)
                         .header("X-Forwarded-Host", "evil.example")
@@ -429,11 +566,18 @@ class AdminMcpEndpointTest {
                 .content(body);
     }
 
-    private static MockHttpServletRequestBuilder modernDiscoveryProbe() {
-        return mcpRequest("/mcp/admin", """
-                {"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}""")
-                .header("MCP-Protocol-Version", "2026-07-28")
-                .header("Mcp-Method", "server/discover");
+    private double adminRequests(final String era) {
+        return meterRegistry.get(MCP_REQUESTS).tags("endpoint", "/mcp/admin", "era", era, "header", "ok").counter().count();
+    }
+
+    private static MockHttpServletRequestBuilder modernRequest(final String path, final String method, final String body) {
+        return mcpRequest(path, body)
+                .header(PROTOCOL_VERSION_HEADER, MODERN_VERSION)
+                .header(METHOD_HEADER, method);
+    }
+
+    private static MockHttpServletRequestBuilder modernToolCall(final String path, final String tool, final String body) {
+        return modernRequest(path, "tools/call", body).header(NAME_HEADER, tool);
     }
 
     private static RSAKey generateSigningKey() {
@@ -461,7 +605,10 @@ class AdminMcpEndpointTest {
             ClientIpResolver.class,
             ClockConfiguration.class,
             AdminMcpServerConfiguration.class,
-            ShortLinks.class
+            ShortLinks.class,
+            ModernMcpServers.class,
+            McpEraFilterConfiguration.class,
+            DefaultSettingsTestConfiguration.class
     })
     static class TestApplication {
     }
