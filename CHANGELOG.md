@@ -4,6 +4,18 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.37] — 2026-11-17
+
+AI apps can connect with the newest MCP version.
+
+### 🔑 Improvements
+- AI apps can connect to hrva.cc with the newest MCP version, 2026-07-28. Apps that use the older version keep working as before.
+
+### 🔧 Admin
+- A new setting, AI apps on MCP 2026-07-28, in the Access group. Turn it off and AI apps use the older version only, as before this release. Turn it off only if an AI app can't call hrva.cc tools.
+
+---
+
 ## [v2.36] — 2026-11-17
 
 You stay signed in for 7 days.

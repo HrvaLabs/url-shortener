@@ -48,7 +48,7 @@ The changelog is shown at [app.hrva.cc/changelog](https://app.hrva.cc/changelog)
 - You can export your data and delete your account.
 
 ### AI connector
-- AI apps such as Claude use hrva.cc over MCP at `https://hrva.cc/mcp`, signing in with OAuth 2.1. The admin moderation tools are a second connector at `https://hrva.cc/mcp/admin`.
+- AI apps such as Claude use hrva.cc over MCP at `https://hrva.cc/mcp`, signing in with OAuth 2.1. Both MCP 2025-11-25 and MCP 2026-07-28 are served; the Settings switch `MCP_MODERN` turns the newer one off. The admin moderation tools are a second connector at `https://hrva.cc/mcp/admin`.
 
 ### Admin
 - Pages for stats, the review queue, moderation, blocklists, domain rules, reserved aliases, bio pages, custom domains and the audit log.

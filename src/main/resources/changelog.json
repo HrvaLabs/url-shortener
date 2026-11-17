@@ -1,10 +1,31 @@
 {
   "releases": [
     {
-      "version": "v2.36",
+      "version": "v2.37",
       "date": "2026-11-17",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "AI apps can connect with the newest MCP version.",
+      "sections": [
+        {
+          "title": "Improvements",
+          "icon": "key",
+          "items": [
+            "AI apps can connect to hrva.cc with the newest MCP version, 2026-07-28. Apps that use the older version keep working as before."
+          ]
+        },
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "A new setting, AI apps on MCP 2026-07-28, in the Access group. Turn it off and AI apps use the older version only, as before this release. Turn it off only if an AI app can't call hrva.cc tools."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.36",
+      "date": "2026-11-17",
       "summary": "You stay signed in for 7 days.",
       "sections": [
         {
