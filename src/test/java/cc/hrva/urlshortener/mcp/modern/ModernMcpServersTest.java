@@ -2,12 +2,15 @@ package cc.hrva.urlshortener.mcp.modern;
 
 import cc.hrva.urlshortener.configuration.AppConfiguration;
 import cc.hrva.urlshortener.configuration.ClockConfiguration;
+import cc.hrva.urlshortener.dto.CreateUrlDto;
+import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.UrlResponse;
 import cc.hrva.urlshortener.mcp.admin.AdminMcpServerConfiguration;
 import cc.hrva.urlshortener.mcp.admin.AdminMcpTools;
 import cc.hrva.urlshortener.mcp.tools.LinkTools;
 import cc.hrva.urlshortener.mcp.tools.ModerationTools;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.CreatedVia;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
@@ -31,6 +34,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.mcp.server.common.autoconfigure.McpServerJsonMapperAutoConfiguration;
 import org.springframework.ai.mcp.server.common.autoconfigure.McpServerStatelessAutoConfiguration;
 import org.springframework.ai.mcp.server.common.autoconfigure.annotations.McpServerAnnotationScannerAutoConfiguration;
@@ -66,7 +70,9 @@ import tools.jackson.databind.json.JsonMapper;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -92,6 +98,7 @@ class ModernMcpServersTest {
     private static final String METHOD_HEADER = "Mcp-Method";
     private static final String NAME_HEADER = "Mcp-Name";
     private static final String EMAIL = "user@localhost";
+    private static final String ADMIN_EMAIL = "admin@localhost";
     private static final String SERVER_INFO = "$.result._meta['io.modelcontextprotocol/serverInfo']";
     private static final List<String> LINK_TOOLS = List.of("list_links", "shorten_url", "link_stats");
     private static final List<String> MODERATION_TOOLS = List.of("block_domain", "block_link", "block_user", "check_url", "delete_link",
@@ -102,6 +109,10 @@ class ModernMcpServersTest {
             {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}""";
     private static final String LIST_LINKS_CALL = """
             {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_links","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}""";
+    private static final String SHORTEN_URL_CALL = """
+            {"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"shorten_url","arguments":{"url":"https://example.com/page","alias":"menu","visitLimit":5,"expiresAt":"2030-06-30T21:59:00Z","tags":["work"]},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}""";
+    private static final String CHECK_URL_CALL = """
+            {"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"check_url","arguments":{"url":"https://evil.example/login?token=abc"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}""";
     private static final String UNKNOWN_METHOD = """
             {"jsonrpc":"2.0","id":4,"method":"links/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}""";
     private static final String FUTURE_VERSION_DISCOVER = """
@@ -218,18 +229,12 @@ class ModernMcpServersTest {
 
     @Test
     void toolsCallRunsTheToolAsTheSignedInUser() throws Exception {
-        final var user = User.builder().id(7L).email(EMAIL).active(true).build();
-        when(userService.fetchActiveUserByEmail(EMAIL)).thenReturn(user);
+        signIn(User.builder().id(7L).email(EMAIL).active(true).build());
         when(urlService.getAllMyUrls(isNull(), any(), any()))
                 .thenReturn(new PageImpl<>(List.of(new UrlResponse(1L, "https://example.com/first", "abc12", LocalDateTime.now(), null, 3L, null, true,
                         "ACTIVE", Set.of(), false, EMAIL))));
-        SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(Jwt.withTokenValue("token")
-                .header("alg", "none")
-                .subject(EMAIL)
-                .build()));
 
-        final var response = send(MCP, LIST_LINKS_CALL, Map.of(PROTOCOL_VERSION_HEADER, MODERN_VERSION, METHOD_HEADER, "tools/call",
-                NAME_HEADER, "list_links"));
+        final var response = send(MCP, LIST_LINKS_CALL, toolCallHeaders("list_links"));
 
         assertThat(response.getStatus()).isEqualTo(200);
         final var body = response.getContentAsString();
@@ -237,6 +242,43 @@ class ModernMcpServersTest {
         assertThat(JsonPath.<Boolean>read(body, "$.result.isError")).isFalse();
         assertThat(JsonPath.<String>read(body, "$.result.content[0].text"))
                 .isEqualTo("https://hrva.cc/abc12 -> https://example.com/first | 3 visits | ACTIVE");
+    }
+
+    @Test
+    void toolsCallPassesTheArgumentsToTheTool() throws Exception {
+        signIn(User.builder().id(7L).email(EMAIL).active(true).build());
+        when(urlService.saveUrlRouting(any(), isNull(), eq(CreatedVia.MCP))).thenReturn(new UrlResponse(11L, "https://example.com/page", "menu",
+                LocalDateTime.now(), null, 0L, 5L, true, "ACTIVE", Set.of("ai", "work"), false, EMAIL));
+
+        final var response = send(MCP, SHORTEN_URL_CALL, toolCallHeaders("shorten_url"));
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(JsonPath.<Boolean>read(response.getContentAsString(), "$.result.isError")).isFalse();
+        final var created = ArgumentCaptor.forClass(CreateUrlDto.class);
+        verify(urlService).saveUrlRouting(created.capture(), isNull(), eq(CreatedVia.MCP));
+        assertThat(created.getValue()).isEqualTo(CreateUrlDto.builder()
+                .longUrl("https://example.com/page")
+                .shortUrl("menu")
+                .visitLimit(5L)
+                .expirationDate(LocalDateTime.of(2030, 6, 30, 21, 59))
+                .tags(Set.of("ai", "work"))
+                .build());
+    }
+
+    @Test
+    void adminToolsCallPassesTheArgumentsToTheTool() throws Exception {
+        signIn(User.builder().id(1L).email(ADMIN_EMAIL).active(true).twoStepEnabled(true).build());
+        when(userRepository.existsByIdAndAuthoritiesName(1L, "ROLE_ADMIN")).thenReturn(true);
+        when(linkCheckService.explain("https://evil.example/login?token=abc")).thenReturn(LinkVerdict.clean());
+
+        final var response = send(ADMIN, CHECK_URL_CALL, toolCallHeaders("check_url"));
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        final var body = response.getContentAsString();
+        assertThat(JsonPath.<String>read(body, "$.result.resultType")).isEqualTo("complete");
+        assertThat(JsonPath.<Boolean>read(body, "$.result.isError")).isFalse();
+        assertThat(JsonPath.<String>read(body, "$.result.content[0].text")).contains("Verdict: CLEAN");
+        verify(linkCheckService).explain("https://evil.example/login?token=abc");
     }
 
     @ParameterizedTest
@@ -324,6 +366,18 @@ class ModernMcpServersTest {
 
     private static Map<String, String> modernHeaders(final String method) {
         return Map.of(PROTOCOL_VERSION_HEADER, MODERN_VERSION, METHOD_HEADER, method);
+    }
+
+    private static Map<String, String> toolCallHeaders(final String tool) {
+        return Map.of(PROTOCOL_VERSION_HEADER, MODERN_VERSION, METHOD_HEADER, "tools/call", NAME_HEADER, tool);
+    }
+
+    private void signIn(final User user) {
+        when(userService.fetchActiveUserByEmail(user.getEmail())).thenReturn(user);
+        SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(Jwt.withTokenValue("token")
+                .header("alg", "none")
+                .subject(user.getEmail())
+                .build()));
     }
 
     private static String legacyToolsList(final RouterFunction<ServerResponse> routerFunction, final String endpoint) throws Exception {
