@@ -194,6 +194,22 @@ class AuthorizationServerConfigurationTest {
     }
 
     @Test
+    void registrationAcceptsApplicationType() throws Exception {
+        final var registrations = List.of(
+                REGISTRATION_WITH_METADATA.formatted("\"application_type\":\"native\""),
+                """
+                {"redirect_uris":["https://client.example/callback"],"token_endpoint_auth_method":"none","application_type":"web"}""");
+
+        for (final var registration : registrations) {
+            mockMvc.perform(post("/oauth2/register")
+                            .contentType(APPLICATION_JSON)
+                            .content(registration))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.client_id").isNotEmpty());
+        }
+    }
+
+    @Test
     void dcrClientIsStoredWithOneHourAccessTokensPkceAndNoConsentScreen() throws Exception {
         final var clientId = registerClient();
 
