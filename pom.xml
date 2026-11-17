@@ -23,15 +23,15 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <springdocVersion>3.2.0</springdocVersion>
         <jsonwebtokenVersion>0.13.0</jsonwebtokenVersion>
-        <apacheCommonsVersion>3.21.0</apacheCommonsVersion>
+        <apacheCommonsVersion>3.22.0</apacheCommonsVersion>
         <commonsIoVersion>2.22.0</commonsIoVersion>
         <googleApiClientVersion>2.9.2</googleApiClientVersion>
         <googleApiServicesSafebrowsingVersion>v5-rev20251214-2.9.2</googleApiServicesSafebrowsingVersion>
         <zxingVersion>3.5.4</zxingVersion>
-        <jsoupVersion>1.23.2</jsoupVersion>
-        <guavaVersion>33.7.2-jre</guavaVersion>
+        <jsoupVersion>1.24.1</jsoupVersion>
+        <guavaVersion>33.8.0-jre</guavaVersion>
         <springAiVersion>2.0.2</springAiVersion>
-        <mcpSdkVersion>2.1.0</mcpSdkVersion>
+        <mcpSdkVersion>2.2.0</mcpSdkVersion>
         <mcpSecurityVersion>0.1.14</mcpSecurityVersion>
 
         <!-- Newer than Spring Boot 4.1.2 manages; drop each once Boot manages the same or newer -->
