@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.ai.mcp.server.common.autoconfigure.McpServerJsonMapperAutoConfiguration;
@@ -41,6 +42,8 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.validation.autoconfigure.ValidationAutoConfiguration;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.ComponentScan;
@@ -79,6 +82,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
                 "app.mcp.signing-key=unused-in-this-test",
                 "spring.ai.mcp.server.instructions=Test instructions for both servers."
         })
+@ExtendWith(OutputCaptureExtension.class)
 class ModernMcpServersTest {
 
     private static final String MCP = "/mcp";
@@ -274,6 +278,17 @@ class ModernMcpServersTest {
     @Test
     void moderationToolsAreNeverABean() {
         assertThat(applicationContext.getBeanNamesForType(ModerationTools.class)).isEmpty();
+    }
+
+    @Test
+    void buildingTheServersLogsNoRequestStateKeyWarning(final CapturedOutput output) {
+        final var outputBeforeBuild = output.length();
+
+        new ModernMcpServers(serverProperties).modernMcpTransports(mcpServerJsonMapper, linkTools, adminMcpTools);
+
+        assertThat(output.toString().substring(outputBeforeBuild))
+                .doesNotContain("HmacRequestStateCodec")
+                .doesNotContain("no key configured");
     }
 
     @Test
