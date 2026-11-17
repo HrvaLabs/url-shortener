@@ -618,6 +618,31 @@ class McpEndpointSecurityTest {
     }
 
     @Test
+    void otherHeaderMismatchesStayStrict(final CapturedOutput output) throws Exception {
+        final var token = accessTokens.issue(EMAIL, RESOURCE);
+        final var modernBefore = requests("modern", "ok");
+        final var correctedBefore = requests("modern", "corrected");
+        final var outputBeforeCall = output.length();
+
+        mockMvc.perform(mcpRequest(MODERN_TOOLS_LIST)
+                        .header(PROTOCOL_VERSION_HEADER, "2099-01-01")
+                        .header(METHOD_HEADER, "tools/list")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value(-32020));
+        mockMvc.perform(mcpRequest(TOOLS_LIST)
+                        .header(PROTOCOL_VERSION_HEADER, MODERN_VERSION)
+                        .header(METHOD_HEADER, "tools/list")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value(-32602));
+
+        assertThat(requests("modern", "ok")).isEqualTo(modernBefore + 2);
+        assertThat(requests("modern", "corrected")).isEqualTo(correctedBefore);
+        assertThat(output.toString().substring(outputBeforeCall)).doesNotContain("Corrected an MCP-Protocol-Version header");
+    }
+
+    @Test
     void initializeWithModernHeadersStillWorks() throws Exception {
         final var token = accessTokens.issue(EMAIL, RESOURCE);
 
