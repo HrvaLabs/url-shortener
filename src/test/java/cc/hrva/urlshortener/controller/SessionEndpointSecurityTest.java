@@ -164,7 +164,7 @@ class SessionEndpointSecurityTest {
     }
 
     @Test
-    void renewingASessionAnswersATokenThatEndsTenHoursFromNowWithTheSameSignIn() throws Exception {
+    void renewingASessionAnswersATokenThatEndsSevenDaysFromNowWithTheSameSignIn() throws Exception {
         final var active = tokenIssued(Duration.ofHours(3));
 
         final var answer = mockMvc.perform(post(RENEW_SESSION).header(JwtFilter.AUTHORIZATION_HEADER, "Bearer " + active))
@@ -173,7 +173,7 @@ class SessionEndpointSecurityTest {
 
         final var renewed = tokenProvider.read(answer.getHeader(JwtFilter.AUTHORIZATION_HEADER).substring(7)).orElseThrow();
         final var original = tokenProvider.read(active).orElseThrow();
-        assertThat(renewed.expiresAt()).isCloseTo(Instant.now().plus(Duration.ofHours(10)), org.assertj.core.api.Assertions.within(5, java.time.temporal.ChronoUnit.SECONDS));
+        assertThat(renewed.expiresAt()).isCloseTo(Instant.now().plus(Duration.ofDays(7)), org.assertj.core.api.Assertions.within(5, java.time.temporal.ChronoUnit.SECONDS));
         assertThat(renewed.signedInAt()).isEqualTo(original.signedInAt());
         assertThat(ana.getTokensValidAfter()).isNull();
     }
