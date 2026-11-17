@@ -39,6 +39,7 @@ import com.jayway.jsonpath.JsonPath;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.List;
 import java.util.Map;
@@ -59,6 +60,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.http.HttpHeaders;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -531,6 +533,26 @@ class AdminMcpEndpointTest {
     }
 
     @Test
+    void aTokenForMcpDoesNotOpenMcpAdminOverModernMcp() throws Exception {
+        signedIn(admin(true));
+        final var mcpToken = accessTokens.issue(ADMIN_EMAIL, MCP_RESOURCE);
+        final var adminToken = accessTokens.issue(ADMIN_EMAIL, ADMIN_RESOURCE);
+        final var requestsBefore = mcpRequests();
+
+        final var adminRefusal = refusedTheSameInBothEras("/mcp/admin", mcpToken);
+        final var mcpRefusal = refusedTheSameInBothEras("/mcp", adminToken);
+
+        assertThat(adminRefusal.getStatus()).isEqualTo(401);
+        assertThat(adminRefusal.getHeader(HttpHeaders.WWW_AUTHENTICATE))
+                .contains("error=\"invalid_token\"")
+                .contains("resource_metadata=\"" + ADMIN_RESOURCE_METADATA + "\"");
+        assertThat(mcpRefusal.getStatus()).isEqualTo(401);
+        assertThat(mcpRefusal.getHeader(HttpHeaders.WWW_AUTHENTICATE)).contains("error=\"invalid_token\"");
+        assertThat(mcpRequests()).isEqualTo(requestsBefore);
+        verifyNoInteractions(moderationService);
+    }
+
+    @Test
     void adminMetadataNamesTheAdminResource() throws Exception {
         mockMvc.perform(get("/.well-known/oauth-protected-resource/mcp/admin")
                         .header("X-Forwarded-Host", "evil.example")
@@ -564,6 +586,27 @@ class AdminMcpEndpointTest {
                 .header(HttpHeaders.ACCEPT, MCP_ACCEPT)
                 .contentType(APPLICATION_JSON)
                 .content(body);
+    }
+
+    private MockHttpServletResponse refusedTheSameInBothEras(final String path, final String token) throws Exception {
+        final var legacy = mockMvc.perform(mcpRequest(path, TOOLS_LIST).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andReturn()
+                .getResponse();
+
+        for (final var modernRequest : List.of(modernRequest(path, SERVER_DISCOVER, MODERN_DISCOVER), modernRequest(path, "tools/list", MODERN_TOOLS_LIST))) {
+            final var modern = mockMvc.perform(modernRequest.header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                    .andReturn()
+                    .getResponse();
+            assertThat(modern.getStatus()).isEqualTo(legacy.getStatus());
+            assertThat(modern.getHeader(HttpHeaders.WWW_AUTHENTICATE)).isEqualTo(legacy.getHeader(HttpHeaders.WWW_AUTHENTICATE));
+            assertThat(modern.getContentAsString()).isEqualTo(legacy.getContentAsString());
+        }
+
+        return legacy;
+    }
+
+    private double mcpRequests() {
+        return meterRegistry.find(MCP_REQUESTS).counters().stream().mapToDouble(Counter::count).sum();
     }
 
     private double adminRequests(final String era) {
