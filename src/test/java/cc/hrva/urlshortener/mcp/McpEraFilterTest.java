@@ -14,11 +14,17 @@ import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Named;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.boot.security.autoconfigure.web.servlet.SecurityFilterProperties;
@@ -29,6 +35,12 @@ import org.springframework.mock.env.MockEnvironment;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.AuthorityUtils;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -64,6 +76,16 @@ class McpEraFilterTest {
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private final McpEraFilter filter = new McpEraFilter(new ModernMcpTransports(Map.of(MCP, mcpTransport, ADMIN, adminTransport)), settingsService,
             JsonMapper.builder().build(), meterRegistry);
+
+    @BeforeEach
+    void signIn() {
+        SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt(), List.of()));
+    }
+
+    @AfterEach
+    void signOut() {
+        SecurityContextHolder.clearContext();
+    }
 
     @Test
     void everySeriesIsThereFromTheStart() {
@@ -126,6 +148,25 @@ class McpEraFilterTest {
         assertThat(served.getHeader(PROTOCOL_VERSION_HEADER)).isEqualTo(MODERN_VERSION);
         assertThat(requests(endpoint, "modern", "ok")).isEqualTo(1);
         assertThat(totalRequests()).isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @MethodSource("notSignedInWithAnMcpToken")
+    void aModernRequestWithoutAnMcpSignInContinuesUnread(final Authentication authentication) throws Exception {
+        SecurityContextHolder.clearContext();
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+
+        for (final var endpoint : List.of(MCP, ADMIN)) {
+            final var request = post(endpoint, MODERN_TOOLS_LIST, Map.of(PROTOCOL_VERSION_HEADER, MODERN_VERSION, METHOD_HEADER, "tools/list"));
+            final var chain = new MockFilterChain();
+
+            filter.doFilter(request, new MockHttpServletResponse(), chain);
+
+            assertThat(chain.getRequest()).isSameAs(request);
+            assertThat(new String(request.getInputStream().readAllBytes(), StandardCharsets.UTF_8)).isEqualTo(MODERN_TOOLS_LIST);
+        }
+        verifyNoInteractions(mcpTransport, adminTransport);
+        assertThat(totalRequests()).isZero();
     }
 
     @Test
@@ -253,6 +294,20 @@ class McpEraFilterTest {
 
     private double totalRequests() {
         return meterRegistry.find(REQUESTS).counters().stream().mapToDouble(Counter::count).sum();
+    }
+
+    private static Stream<Named<Authentication>> notSignedInWithAnMcpToken() {
+        return Stream.of(
+                Named.of("no authentication", null),
+                Named.of("an anonymous token", new AnonymousAuthenticationToken("key", "anonymousUser", AuthorityUtils.createAuthorityList("ROLE_ANONYMOUS"))),
+                Named.of("an unauthenticated MCP token", new JwtAuthenticationToken(jwt())));
+    }
+
+    private static Jwt jwt() {
+        return Jwt.withTokenValue("token")
+                .header("alg", "none")
+                .subject("user@localhost")
+                .build();
     }
 
     private static MockHttpServletRequest post(final String endpoint, final String body, final Map<String, String> headers) {

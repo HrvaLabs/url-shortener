@@ -24,6 +24,8 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.filter.OncePerRequestFilter;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -72,6 +74,11 @@ public class McpEraFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(final HttpServletRequest request, final HttpServletResponse response, final FilterChain filterChain)
             throws ServletException, IOException {
+        if (!signedInWithAnMcpToken()) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         final var endpoint = endpointOf(request);
         if (!settingsService.isOn(SettingKey.MCP_MODERN)) {
             legacyRequests.get(endpoint).increment();
@@ -100,6 +107,10 @@ public class McpEraFilter extends OncePerRequestFilter {
             log.info("Corrected an MCP-Protocol-Version header on {}: {} -> {}", endpoint, versionHeader.trim(), loggable(correctedVersion));
         }
         transports.forEndpoint(endpoint).service(new ReplayableRequest(request, body, correctedVersion), response);
+    }
+
+    private static boolean signedInWithAnMcpToken() {
+        return SecurityContextHolder.getContext().getAuthentication() instanceof JwtAuthenticationToken authentication && authentication.isAuthenticated();
     }
 
     private static String endpointOf(final HttpServletRequest request) {
