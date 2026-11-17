@@ -4,7 +4,33 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
+    groups:
+      mcp:
+        applies-to: version-updates
+        patterns:
+          - "io.modelcontextprotocol.sdk:*"
+          - "org.springframework.ai:*"
+          - "org.springaicommunity:*"
+      maven-minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "io.modelcontextprotocol.sdk:*"
+          - "org.springframework.ai:*"
+          - "org.springaicommunity:*"
+        update-types:
+          - "minor"
+          - "patch"
+      maven-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      actions:
+        patterns:
+          - "*"
