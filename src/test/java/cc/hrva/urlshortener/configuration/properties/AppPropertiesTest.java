@@ -12,12 +12,14 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.context.properties.bind.BindException;
 import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.properties.bind.PropertySourcesPlaceholdersResolver;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.bind.validation.BindValidationException;
 import org.springframework.boot.context.properties.bind.validation.ValidationBindHandler;
 import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
+import org.springframework.core.env.MutablePropertySources;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.env.SystemEnvironmentPropertySource;
 import org.springframework.core.io.ClassPathResource;
@@ -362,6 +364,26 @@ class AppPropertiesTest {
 
         assertThat(yaml.getFirst().getProperty("app.burst.links")).isEqualTo(5);
         assertThat(yaml.getFirst().getProperty("app.burst.window")).isEqualTo("1h");
+    }
+
+    @Test
+    void theApplicationYamlKeepsASignInForSevenDays() throws IOException {
+        assertThat(signInSeconds(Map.of())).isEqualTo(604_800L);
+    }
+
+    @Test
+    void theSignInLengthCanBeSetFromTheEnvironment() throws IOException {
+        assertThat(signInSeconds(Map.of("APP_JWT_TOKEN_VALIDITY_SECONDS", "3600"))).isEqualTo(3_600L);
+    }
+
+    private static Long signInSeconds(final Map<String, Object> variables) throws IOException {
+        final var yaml = new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yaml")).getFirst();
+        final var sources = new MutablePropertySources();
+        sources.addLast(new SystemEnvironmentPropertySource("variables", variables));
+        sources.addLast(yaml);
+
+        return new Binder(ConfigurationPropertySources.from(yaml), new PropertySourcesPlaceholdersResolver(sources))
+                .bind("app.jwt-token-validity-seconds", Long.class).get();
     }
 
     @Test
