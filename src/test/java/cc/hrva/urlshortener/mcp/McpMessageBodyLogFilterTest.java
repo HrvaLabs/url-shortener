@@ -36,6 +36,22 @@ class McpMessageBodyLogFilterTest {
     }
 
     @Test
+    void dropsModernLinesThatCarryRequestContent() {
+        final var jsonRpc = "io.modelcontextprotocol.modern.JsonRpc";
+        final var server = "io.modelcontextprotocol.modern.server.McpServer";
+        final var params = "io.modelcontextprotocol.modern.server.feature.Params";
+        final var headers = "io.modelcontextprotocol.modern.server.feature.ParamHeaderValidator";
+
+        assertThat(decide(jsonRpc, "Received JSON message: {}")).isEqualTo(FilterReply.DENY);
+        assertThat(decide(params, "Malformed params for {}")).isEqualTo(FilterReply.DENY);
+        assertThat(decide(server, "Malformed request value")).isEqualTo(FilterReply.DENY);
+        assertThat(decide(server, "Request {} failed: {}")).isEqualTo(FilterReply.DENY);
+        assertThat(decide(headers, "Rejecting tools/call: {} (header: {}, argument: {})")).isEqualTo(FilterReply.DENY);
+        assertThat(decide(server, "Unhandled exception while handling request {}")).isEqualTo(FilterReply.NEUTRAL);
+        assertThat(decide("cc.hrva.urlshortener.SomethingElse", "Received JSON message: {}")).isEqualTo(FilterReply.NEUTRAL);
+    }
+
+    @Test
     void keepsHandlerFailuresAndOtherLoggers() {
         assertThat(decide(STATELESS_TRANSPORT, "Failed to handle request: Unknown tool")).isEqualTo(FilterReply.NEUTRAL);
         assertThat(decide(STATELESS_TRANSPORT, "Unexpected error handling message: boom")).isEqualTo(FilterReply.NEUTRAL);

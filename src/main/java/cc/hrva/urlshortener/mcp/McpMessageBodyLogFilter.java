@@ -8,6 +8,7 @@ import ch.qos.logback.core.spi.FilterReply;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
+import java.util.List;
 import org.slf4j.LoggerFactory;
 import org.slf4j.Marker;
 import org.springframework.stereotype.Component;
@@ -21,6 +22,13 @@ public class McpMessageBodyLogFilter extends TurboFilter {
     private static final String UNREADABLE_MESSAGE = "Failed to deserialize message";
     private static final String UNKNOWN_REQUEST_METHOD = "Failed to handle request: Missing handler for request type:";
     private static final String UNKNOWN_NOTIFICATION_METHOD = "Missing handler for notification type:";
+    private static final String MODERN_LOGGERS = "io.modelcontextprotocol.modern.";
+    private static final List<String> MODERN_BODY_MESSAGES = List.of(
+            "Received JSON message:",
+            "Malformed params for",
+            "Malformed request value",
+            "Request {} failed:",
+            "Rejecting tools/call:");
 
     @PostConstruct
     void register() {
@@ -59,6 +67,10 @@ public class McpMessageBodyLogFilter extends TurboFilter {
 
         if (format.startsWith(UNKNOWN_NOTIFICATION_METHOD) && STATELESS_HANDLER_LOGGER.equals(logger.getName())) {
             log.debug("Ignored an MCP notification without a handler");
+            return FilterReply.DENY;
+        }
+
+        if (logger.getName().startsWith(MODERN_LOGGERS) && MODERN_BODY_MESSAGES.stream().anyMatch(format::startsWith)) {
             return FilterReply.DENY;
         }
 

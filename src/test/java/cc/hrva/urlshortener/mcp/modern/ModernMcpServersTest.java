@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.configuration.ClockConfiguration;
 import cc.hrva.urlshortener.dto.CreateUrlDto;
 import cc.hrva.urlshortener.dto.LinkVerdict;
 import cc.hrva.urlshortener.dto.UrlResponse;
+import cc.hrva.urlshortener.mcp.McpMessageBodyLogFilter;
 import cc.hrva.urlshortener.mcp.admin.AdminMcpServerConfiguration;
 import cc.hrva.urlshortener.mcp.admin.AdminMcpTools;
 import cc.hrva.urlshortener.mcp.tools.LinkTools;
@@ -23,6 +24,11 @@ import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.domain.ShortLinks;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.classic.spi.ThrowableProxyUtil;
+import ch.qos.logback.core.read.ListAppender;
 import com.jayway.jsonpath.JsonPath;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
@@ -35,6 +41,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.mcp.server.common.autoconfigure.McpServerJsonMapperAutoConfiguration;
 import org.springframework.ai.mcp.server.common.autoconfigure.McpServerStatelessAutoConfiguration;
 import org.springframework.ai.mcp.server.common.autoconfigure.annotations.McpServerAnnotationScannerAutoConfiguration;
@@ -348,6 +355,54 @@ class ModernMcpServersTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {MCP, ADMIN})
+    void requestBodiesNeverReachTheLogs(final String endpoint) throws Exception {
+        final var marker = "SECRET-MARKER";
+        final var meta = "\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}";
+        final var bodies = List.of(
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"" + marker + "\"",
+                "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":123,\"arguments\":\"" + marker + "\"," + meta + "}}",
+                "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"" + marker + "/unknown\",\"params\":{\"secret\":\"" + marker + "\"," + meta + "}}",
+                "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"" + marker + "\",\"arguments\":{\"url\":\"" + marker + "\"}," + meta + "}}",
+                "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"list_links\",\"arguments\":{\"x\":\"" + marker + "\"}," + meta + "}}",
+                "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"tools/list\",\"params\":{\"cursor\":{\"x\":\"" + marker + "\"}," + meta + "}}",
+                "{\"jsonrpc\":\"2.0\",\"id\":7,\"params\":\"" + marker + "\"}",
+                "[\"" + marker + "\"]");
+        final var appender = new ListAppender<ILoggingEvent>();
+        appender.start();
+        final var loggers = List.of((Logger) LoggerFactory.getLogger("io.modelcontextprotocol"),
+                (Logger) LoggerFactory.getLogger("org.springframework.ai"));
+        final var levels = loggers.stream().map(Logger::getLevel).toList();
+        loggers.forEach(logger -> {
+            logger.setLevel(Level.DEBUG);
+            logger.addAppender(appender);
+        });
+
+        try {
+            for (final var body : bodies) {
+                send(endpoint, body, toolCallHeaders("list_links"));
+                send(endpoint, body, modernHeaders("tools/list"));
+            }
+        } finally {
+            for (var i = 0; i < loggers.size(); i++) {
+                loggers.get(i).detachAppender(appender);
+                loggers.get(i).setLevel(levels.get(i));
+            }
+        }
+
+        assertThat(appender.list).noneMatch(event -> (event.getFormattedMessage() + ThrowableProxyUtil.asString(event.getThrowableProxy()))
+                .contains(marker));
+    }
+
+    @Test
+    void truncatedModernBodyAnswersAParseError() throws Exception {
+        final var response = send(MCP, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"SECRET-MARKER\"",
+                modernHeaders("tools/call"));
+
+        assertThat(response.getContentAsString()).contains("-32700").doesNotContain("SECRET-MARKER");
+    }
+
     private MockHttpServletResponse send(final String endpoint, final String body, final Map<String, String> headers) throws Exception {
         final var response = new MockHttpServletResponse();
         transports.forEndpoint(endpoint).service(request(endpoint, body, headers), response);
@@ -407,7 +462,8 @@ class ModernMcpServersTest {
             ClockConfiguration.class,
             ShortLinks.class,
             AdminMcpServerConfiguration.class,
-            ModernMcpServers.class
+            ModernMcpServers.class,
+            McpMessageBodyLogFilter.class
     })
     static class TestApplication {
     }
