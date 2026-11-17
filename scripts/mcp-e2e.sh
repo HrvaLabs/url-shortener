@@ -61,7 +61,9 @@
 # doesn't clear the network, hashed keys, the admin list and clearing it).
 # Section 14c checks MCP 2026-07-28 with curl on /mcp and /mcp/admin, with the tokens of section 14b: server/discover, tools/list, tools/call
 # (list_links, and moderation_summary on /mcp/admin) with Mcp-Method, Mcp-Name and _meta, an unknown method answering 404, and a legacy
-# initialize that still gets the 2025 result when it carries MCP-Protocol-Version: 2026-07-28. The Inspector sections are untouched.
+# initialize that still gets the 2025 result when it carries MCP-Protocol-Version: 2026-07-28. Then the refusals: no token, user@localhost's
+# /mcp/admin token and a /mcp token on /mcp/admin get the same status, WWW-Authenticate and body as a legacy tools/list. The Inspector
+# sections are untouched.
 # Section 14 first checks that admin@localhost, whose two-step sign-in is off, gets the 403 "Turn on two-step sign-in to use admin pages."
 # on an admin page and on GET /api/v1/users while its own /users/me and two-step setting work, then sets two_step_enabled in Postgres, so the
 # same token opens admin pages from then on. Section 14b checks the admin MCP endpoint /mcp/admin: its own 401 and protected resource
@@ -862,6 +864,7 @@ expect_eq "$HTTP_STATUS" 200 "and the refreshed token opens /mcp/admin"
 
 echo "  --- user@localhost signs in for /mcp/admin"
 mcp_sign_in "$APP_JWT" "$ADMIN_RESOURCE"
+USER_ADMIN_MCP_TOKEN=$SIGNED_IN_ACCESS_TOKEN
 expect_eq "$(audience_of "$SIGNED_IN_ACCESS_TOKEN")" "$ADMIN_RESOURCE" "the user gets a /mcp/admin token"
 mcp_post /mcp/admin "$SIGNED_IN_ACCESS_TOKEN" "$TOOLS_LIST"
 expect_eq "$HTTP_STATUS" 403 "but /mcp/admin refuses it with 403"
@@ -897,18 +900,35 @@ MCP_E2E_APP_JWT=$ADMIN_JWT PATH="$SCRIPT_DIR/mcp-e2e/fake-browser:$PATH" MCP_AUT
 expect_eq "$(jq -r '[.tools[].name] | sort | join(",")' <<<"$INSPECTOR_RESULT")" "$MODERATION_TOOLS" \
     "the Inspector finds /mcp/admin's metadata, registers, signs in and lists the eight moderation tools"
 
-section "14c. MCP 2026-07-28 on /mcp and /mcp/admin (curl): discover, tools/list, tools/call, an unknown method, a legacy initialize"
+section "14c. MCP 2026-07-28 on /mcp and /mcp/admin (curl): discover, tools/list, tools/call, an unknown method, a legacy initialize, refusals"
 MODERN_VERSION=2026-07-28
 MODERN_META="\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"$MODERN_VERSION\",\"io.modelcontextprotocol/clientCapabilities\":{}}"
 LINK_TOOLS=link_stats,list_links,shorten_url
 MCP_ADMIN_TOKEN=$REFRESHED_ADMIN_MCP_TOKEN
 
-# modern_post <path> <token> <Mcp-Method> <Mcp-Name, or empty> <JSON-RPC body>
+# modern_post <path> <token, or empty for none> <Mcp-Method> <Mcp-Name, or empty> <JSON-RPC body>
 modern_post() {
-    local name_header=()
+    local auth_header=() name_header=()
+    [[ -n $2 ]] && auth_header=(-H "Authorization: Bearer $2")
     [[ -n $4 ]] && name_header=(-H "Mcp-Name: $4")
-    http -X POST "$BASE$1" -H "Authorization: Bearer $2" -H 'Content-Type: application/json' -H "Accept: $MCP_ACCEPT" \
+    http -X POST "$BASE$1" ${auth_header[@]+"${auth_header[@]}"} -H 'Content-Type: application/json' -H "Accept: $MCP_ACCEPT" \
         -H "MCP-Protocol-Version: $MODERN_VERSION" -H "Mcp-Method: $3" ${name_header[@]+"${name_header[@]}"} -d "$5"
+}
+
+# refused_like_legacy <path> <token, or empty for none> <status> <what>: a legacy tools/list gets <status>, and a modern server/discover
+# and tools/list with the same token get the same status, WWW-Authenticate and body, and no tools. Sets REFUSAL_CHALLENGE.
+refused_like_legacy() {
+    local legacy method
+    mcp_post "$1" "$2" "$TOOLS_LIST"
+    expect_eq "$HTTP_STATUS" "$3" "$4: a legacy tools/list is refused with $3"
+    REFUSAL_CHALLENGE=$(header_value www-authenticate)
+    legacy="$HTTP_STATUS|$REFUSAL_CHALLENGE|$HTTP_BODY"
+    show "WWW-Authenticate: $REFUSAL_CHALLENGE"
+    for method in server/discover tools/list; do
+        modern_post "$1" "$2" "$method" "" "{\"jsonrpc\":\"2.0\",\"id\":31,\"method\":\"$method\",\"params\":{$MODERN_META}}"
+        expect_eq "$HTTP_STATUS|$(header_value www-authenticate)|$HTTP_BODY" "$legacy" "$4: a modern $method gets the same status, WWW-Authenticate and body"
+        expect_eq "$(jq -r '.result.tools // empty' <<<"$HTTP_BODY" 2>/dev/null)" "" "$4: the modern $method lists no tools"
+    done
 }
 
 for endpoint in /mcp /mcp/admin; do
@@ -941,6 +961,17 @@ for endpoint in /mcp /mcp/admin; do
     expect_contains "$HTTP_BODY" '"protocolVersion":"2025-06-18"' "a legacy initialize on $endpoint with MCP-Protocol-Version: $MODERN_VERSION still gets the legacy result"
     expect_contains "$HTTP_BODY" '"serverInfo"' "and it carries the legacy serverInfo"
 done
+
+echo "  --- refusals: a modern request is refused exactly like a legacy one"
+refused_like_legacy /mcp "" 401 "no token on /mcp"
+expect_eq "$REFUSAL_CHALLENGE" "Bearer resource_metadata=\"$BASE/.well-known/oauth-protected-resource/mcp\"" \
+    "the 401 points at /mcp's protected resource metadata"
+refused_like_legacy /mcp/admin "" 401 "no token on /mcp/admin"
+expect_eq "$REFUSAL_CHALLENGE" "Bearer resource_metadata=\"$BASE/.well-known/oauth-protected-resource/mcp/admin\"" \
+    "the 401 points at /mcp/admin's own protected resource metadata"
+refused_like_legacy /mcp/admin "$USER_ADMIN_MCP_TOKEN" 403 "user@localhost's /mcp/admin token on /mcp/admin"
+refused_like_legacy /mcp/admin "$MCP_USER_TOKEN" 401 "a /mcp token on /mcp/admin"
+expect_contains "$REFUSAL_CHALLENGE" 'error="invalid_token"' "it is an invalid token there"
 
 section "15. Passkey options (curl)"
 http -X POST "$BASE/api/v1/auth/passkeys/options"
