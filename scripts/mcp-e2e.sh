@@ -59,6 +59,9 @@
 # account's code answers the pending step), passwords over 72 bytes (field errors, and a
 # sign-in answered like a wrong password) and the Redis login limit per account and per network (429 with Retry-After, a success that
 # doesn't clear the network, hashed keys, the admin list and clearing it).
+# Section 14c checks MCP 2026-07-28 with curl on /mcp and /mcp/admin, with the tokens of section 14b: server/discover, tools/list, tools/call
+# (list_links, and moderation_summary on /mcp/admin) with Mcp-Method, Mcp-Name and _meta, an unknown method answering 404, and a legacy
+# initialize that still gets the 2025 result when it carries MCP-Protocol-Version: 2026-07-28. The Inspector sections are untouched.
 # Section 14 first checks that admin@localhost, whose two-step sign-in is off, gets the 403 "Turn on two-step sign-in to use admin pages."
 # on an admin page and on GET /api/v1/users while its own /users/me and two-step setting work, then sets two_step_enabled in Postgres, so the
 # same token opens admin pages from then on. Section 14b checks the admin MCP endpoint /mcp/admin: its own 401 and protected resource
@@ -885,13 +888,59 @@ http -X POST "$BASE/oauth2/token" \
     --data-urlencode "refresh_token=$SIGNED_IN_REFRESH_TOKEN" \
     --data-urlencode "client_id=$ADMIN_CLIENT_ID" \
     --data-urlencode "resource=$RESOURCE"
-expect_eq "$HTTP_STATUS $(audience_of "$(jq -r .access_token <<<"$HTTP_BODY")")" "200 $RESOURCE" "and its refresh token still works for /mcp"
+MCP_USER_TOKEN=$(jq -r .access_token <<<"$HTTP_BODY")
+expect_eq "$HTTP_STATUS $(audience_of "$MCP_USER_TOKEN")" "200 $RESOURCE" "and its refresh token still works for /mcp"
 
 echo "  --- the MCP Inspector signs in to /mcp/admin on its own, approved by admin@localhost"
 MCP_E2E_APP_JWT=$ADMIN_JWT PATH="$SCRIPT_DIR/mcp-e2e/fake-browser:$PATH" MCP_AUTO_OPEN_ENABLED=true \
     inspector 120 "$ADMIN_RESOURCE" --transport http --callback-url "http://127.0.0.1:$CALLBACK_PORT/oauth/callback" --method tools/list
 expect_eq "$(jq -r '[.tools[].name] | sort | join(",")' <<<"$INSPECTOR_RESULT")" "$MODERATION_TOOLS" \
     "the Inspector finds /mcp/admin's metadata, registers, signs in and lists the eight moderation tools"
+
+section "14c. MCP 2026-07-28 on /mcp and /mcp/admin (curl): discover, tools/list, tools/call, an unknown method, a legacy initialize"
+MODERN_VERSION=2026-07-28
+MODERN_META="\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"$MODERN_VERSION\",\"io.modelcontextprotocol/clientCapabilities\":{}}"
+LINK_TOOLS=link_stats,list_links,shorten_url
+MCP_ADMIN_TOKEN=$REFRESHED_ADMIN_MCP_TOKEN
+
+# modern_post <path> <token> <Mcp-Method> <Mcp-Name, or empty> <JSON-RPC body>
+modern_post() {
+    local name_header=()
+    [[ -n $4 ]] && name_header=(-H "Mcp-Name: $4")
+    http -X POST "$BASE$1" -H "Authorization: Bearer $2" -H 'Content-Type: application/json' -H "Accept: $MCP_ACCEPT" \
+        -H "MCP-Protocol-Version: $MODERN_VERSION" -H "Mcp-Method: $3" ${name_header[@]+"${name_header[@]}"} -d "$5"
+}
+
+for endpoint in /mcp /mcp/admin; do
+    if [[ $endpoint == /mcp ]]; then
+        modern_token=$MCP_USER_TOKEN expected_tools=$LINK_TOOLS
+    else
+        modern_token=$MCP_ADMIN_TOKEN expected_tools=$MODERATION_TOOLS
+    fi
+    echo "  --- $endpoint"
+    modern_post "$endpoint" "$modern_token" server/discover "" "{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"server/discover\",\"params\":{$MODERN_META}}"
+    show "$(jq -c '{supportedVersions: .result.supportedVersions, resultType: .result.resultType, serverInfo: .result.serverInfo}' <<<"$HTTP_BODY")"
+    expect_eq "$HTTP_STATUS $(jq -c .result.supportedVersions <<<"$HTTP_BODY")" "200 [\"$MODERN_VERSION\"]" "server/discover on $endpoint: 200 and supportedVersions [\"$MODERN_VERSION\"]"
+    expect_eq "$(jq -r .result.resultType <<<"$HTTP_BODY")" complete "server/discover on $endpoint has resultType complete"
+    modern_post "$endpoint" "$modern_token" tools/list "" "{\"jsonrpc\":\"2.0\",\"id\":22,\"method\":\"tools/list\",\"params\":{$MODERN_META}}"
+    expect_eq "$HTTP_STATUS $(jq -r "$TOOL_NAMES" <<<"$HTTP_BODY")" "200 $expected_tools" "tools/list on $endpoint lists the same tools as the Inspector run"
+    expect_eq "$(jq -r .result.resultType <<<"$HTTP_BODY")" complete "tools/list on $endpoint has resultType complete"
+    if [[ $endpoint == /mcp ]]; then
+        tool=list_links arguments='{}'
+    else
+        tool=moderation_summary arguments='{}'
+    fi
+    modern_post "$endpoint" "$modern_token" tools/call "$tool" "{\"jsonrpc\":\"2.0\",\"id\":23,\"method\":\"tools/call\",\"params\":{\"name\":\"$tool\",\"arguments\":$arguments,$MODERN_META}}"
+    show "$(jq -r '.result.content[0].text // .' <<<"$HTTP_BODY" | head -c 300)"
+    expect_eq "$HTTP_STATUS $(jq -r '"\(.result.resultType) \(.result.isError)"' <<<"$HTTP_BODY")" "200 complete false" "tools/call $tool on $endpoint: resultType complete, no tool error"
+    modern_post "$endpoint" "$modern_token" nothing/here "" "{\"jsonrpc\":\"2.0\",\"id\":24,\"method\":\"nothing/here\",\"params\":{$MODERN_META}}"
+    expect_eq "$HTTP_STATUS $(jq -r .error.code <<<"$HTTP_BODY")" "404 -32601" "an unknown method on $endpoint is a 404 with JSON-RPC -32601"
+    http -X POST "$BASE$endpoint" -H "Authorization: Bearer $modern_token" -H 'Content-Type: application/json' -H "Accept: $MCP_ACCEPT" \
+        -H "MCP-Protocol-Version: $MODERN_VERSION" -d "$INITIALIZE"
+    show "$(head -c 300 <<<"$HTTP_BODY")"
+    expect_contains "$HTTP_BODY" '"protocolVersion":"2025-06-18"' "a legacy initialize on $endpoint with MCP-Protocol-Version: $MODERN_VERSION still gets the legacy result"
+    expect_contains "$HTTP_BODY" '"serverInfo"' "and it carries the legacy serverInfo"
+done
 
 section "15. Passkey options (curl)"
 http -X POST "$BASE/api/v1/auth/passkeys/options"
