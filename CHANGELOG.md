@@ -4,6 +4,16 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.35.2] — 2026-11-17
+
+The nightly scan stays within Google Safe Browsing's limits.
+
+### 🔧 Admin
+- The nightly scan no longer fails partway through when it reaches Google Safe Browsing's limit of 180 requests a minute. It now checks 20 links per request and spaces its requests half a second apart.
+- Each night, the redirect checks follow up to 300 links due for their weekly check and up to 200 links that go through another shortener (was 500 and 500), so a night's checks stay well inside Google's limit of 1,000 requests a day.
+
+---
+
 ## [v2.35.1] — 2026-11-11
 
 Google Safe Browsing checks work again.

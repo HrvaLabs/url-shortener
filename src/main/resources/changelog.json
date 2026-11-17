@@ -1,10 +1,25 @@
 {
   "releases": [
     {
-      "version": "v2.35.1",
-      "date": "2026-11-11",
+      "version": "v2.35.2",
+      "date": "2026-11-17",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "The nightly scan stays within Google Safe Browsing's limits.",
+      "sections": [
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "The nightly scan no longer fails partway through when it reaches Google Safe Browsing's limit of 180 requests a minute. It now checks 20 links per request and spaces its requests half a second apart.",
+            "Each night, the redirect checks follow up to 300 links due for their weekly check and up to 200 links that go through another shortener (was 500 and 500), so a night's checks stay well inside Google's limit of 1,000 requests a day."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.35.1",
+      "date": "2026-11-11",
       "summary": "Google Safe Browsing checks work again.",
       "sections": [
         {
