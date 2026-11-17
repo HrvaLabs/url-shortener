@@ -11,6 +11,8 @@ import io.modelcontextprotocol.modern.McpSchema.CacheScope;
 import io.modelcontextprotocol.modern.McpSchema.Implementation;
 import io.modelcontextprotocol.modern.server.HmacRequestStateCodec;
 import io.modelcontextprotocol.modern.server.McpServer;
+import io.modelcontextprotocol.modern.server.feature.PromptsFeature;
+import io.modelcontextprotocol.modern.server.feature.ResourcesFeature;
 import io.modelcontextprotocol.modern.server.feature.ToolsFeature;
 import io.modelcontextprotocol.modern.server.transport.HttpServletMcpTransport;
 import io.modelcontextprotocol.server.McpStatelessServerFeatures.SyncToolSpecification;
@@ -57,6 +59,8 @@ public class ModernMcpServers {
                 .jsonMapper(jsonMapper)
                 .feature(ToolsFeature.ofSync(new FixedToolRepository(ModernTools.from(tools, jsonMapper)), jsonMapper,
                         McpJsonDefaults.getSchemaValidator(), CACHE_TTL_MS, CacheScope.PRIVATE))
+                .feature(ResourcesFeature.ofSync(new EmptyResourceRepository(), jsonMapper, CACHE_TTL_MS, CacheScope.PRIVATE))
+                .feature(PromptsFeature.ofSync(new EmptyPromptRepository(), jsonMapper, CACHE_TTL_MS, CacheScope.PRIVATE))
                 .discoverCache(CACHE_TTL_MS, CacheScope.PRIVATE)
                 .requestStateCodec(HmacRequestStateCodec.builder()
                         .jsonMapper(jsonMapper)
