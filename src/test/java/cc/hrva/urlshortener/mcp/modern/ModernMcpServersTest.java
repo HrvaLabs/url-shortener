@@ -359,6 +359,7 @@ class ModernMcpServersTest {
     @ValueSource(strings = {MCP, ADMIN})
     void requestBodiesNeverReachTheLogs(final String endpoint) throws Exception {
         final var marker = "SECRET-MARKER";
+        final var sentinel = "Log capture check: this line must reach the appender";
         final var meta = "\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}";
         final var bodies = List.of(
                 "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"" + marker + "\"",
@@ -384,6 +385,7 @@ class ModernMcpServersTest {
                 send(endpoint, body, toolCallHeaders("list_links"));
                 send(endpoint, body, modernHeaders("tools/list"));
             }
+            LoggerFactory.getLogger("io.modelcontextprotocol.modern.server.McpServer").debug(sentinel);
         } finally {
             for (var i = 0; i < loggers.size(); i++) {
                 loggers.get(i).detachAppender(appender);
@@ -391,6 +393,7 @@ class ModernMcpServersTest {
             }
         }
 
+        assertThat(appender.list).anyMatch(event -> sentinel.equals(event.getFormattedMessage()));
         assertThat(appender.list).noneMatch(event -> (event.getFormattedMessage() + ThrowableProxyUtil.asString(event.getThrowableProxy()))
                 .contains(marker));
     }
