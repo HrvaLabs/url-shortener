@@ -59,7 +59,7 @@
 # account's code answers the pending step), passwords over 72 bytes (field errors, and a
 # sign-in answered like a wrong password) and the Redis login limit per account and per network (429 with Retry-After, a success that
 # doesn't clear the network, hashed keys, the admin list and clearing it).
-# Section 14c checks MCP 2026-07-28 with curl on /mcp and /mcp/admin, with the tokens of section 14b: server/discover, tools/list, tools/call
+# Section 14c checks MCP 2026-07-28 with curl on /mcp and /mcp/admin, with the tokens of section 14b: server/discover, tools/list, resources/list and prompts/list (both empty), tools/call
 # (list_links, and moderation_summary on /mcp/admin) with Mcp-Method, Mcp-Name and _meta, an unknown method answering 404, and a legacy
 # initialize that still gets the 2025 result when it carries MCP-Protocol-Version: 2026-07-28. Then the refusals: no token, user@localhost's
 # /mcp/admin token and a /mcp token on /mcp/admin get the same status, WWW-Authenticate and body as a legacy tools/list. The Inspector
@@ -900,7 +900,7 @@ MCP_E2E_APP_JWT=$ADMIN_JWT PATH="$SCRIPT_DIR/mcp-e2e/fake-browser:$PATH" MCP_AUT
 expect_eq "$(jq -r '[.tools[].name] | sort | join(",")' <<<"$INSPECTOR_RESULT")" "$MODERATION_TOOLS" \
     "the Inspector finds /mcp/admin's metadata, registers, signs in and lists the eight moderation tools"
 
-section "14c. MCP 2026-07-28 on /mcp and /mcp/admin (curl): discover, tools/list, tools/call, an unknown method, a legacy initialize, refusals"
+section "14c. MCP 2026-07-28 on /mcp and /mcp/admin (curl): discover, tools/list, empty resources and prompts, tools/call, an unknown method, a legacy initialize, refusals"
 MODERN_VERSION=2026-07-28
 MODERN_META="\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"$MODERN_VERSION\",\"io.modelcontextprotocol/clientCapabilities\":{}}"
 LINK_TOOLS=link_stats,list_links,shorten_url
@@ -953,6 +953,11 @@ for endpoint in /mcp /mcp/admin; do
     modern_post "$endpoint" "$modern_token" tools/call "$tool" "{\"jsonrpc\":\"2.0\",\"id\":23,\"method\":\"tools/call\",\"params\":{\"name\":\"$tool\",\"arguments\":$arguments,$MODERN_META}}"
     show "$(jq -r '.result.content[0].text // .' <<<"$HTTP_BODY" | head -c 300)"
     expect_eq "$HTTP_STATUS $(jq -r '"\(.result.resultType) \(.result.isError)"' <<<"$HTTP_BODY")" "200 complete false" "tools/call $tool on $endpoint: resultType complete, no tool error"
+    for method in resources/list prompts/list; do
+        modern_post "$endpoint" "$modern_token" "$method" "" "{\"jsonrpc\":\"2.0\",\"id\":25,\"method\":\"$method\",\"params\":{$MODERN_META}}"
+        expect_eq "$HTTP_STATUS $(jq -c '[.result.resources // .result.prompts, .result.resultType]' <<<"$HTTP_BODY")" "200 [[],\"complete\"]" \
+            "$method on $endpoint: an empty list with resultType complete"
+    done
     modern_post "$endpoint" "$modern_token" nothing/here "" "{\"jsonrpc\":\"2.0\",\"id\":24,\"method\":\"nothing/here\",\"params\":{$MODERN_META}}"
     expect_eq "$HTTP_STATUS $(jq -r .error.code <<<"$HTTP_BODY")" "404 -32601" "an unknown method on $endpoint is a 404 with JSON-RPC -32601"
     http -X POST "$BASE$endpoint" -H "Authorization: Bearer $modern_token" -H 'Content-Type: application/json' -H "Accept: $MCP_ACCEPT" \
