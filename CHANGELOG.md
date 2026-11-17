@@ -4,6 +4,15 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.36] — 2026-11-17
+
+You stay signed in for 7 days.
+
+### 🔑 Improvements
+- You stay signed in for 7 days instead of 10 hours, and opening or returning to hrva.cc counts as using it. A sign-in still ends 30 days after you signed in, or when you choose Sign out everywhere in Settings.
+
+---
+
 ## [v2.35.2] — 2026-11-17
 
 The nightly scan stays within Google Safe Browsing's limits.
