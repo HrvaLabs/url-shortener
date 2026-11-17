@@ -12,14 +12,22 @@ import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.impl.DefaultSafeBrowsingRecheckService;
 import cc.hrva.urlshortener.service.impl.DefaultSettingsService;
 import cc.hrva.urlshortener.service.jobs.JobFailedException;
+import cc.hrva.urlshortener.service.notification.HostPacer;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.service.settings.SettingsServiceFixtures;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -62,6 +70,8 @@ class DefaultSafeBrowsingRecheckServiceTest {
     private static final String SCAN_FAILED = "Safe Browsing was unavailable during the link scan, so links were checked without it and the redirect checks wait for the next night";
     private static final String REDIRECTS_FAILED = "Safe Browsing was unavailable during the redirect checks, so the rest wait for the next night";
     private static final List<String> YOUNG_LOOKALIKE = List.of("domain registered in the last 30 days", "imitates njuskalo");
+    private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-11-17T04:30:00Z"), ZoneOffset.UTC);
+    private static final Duration PACE = Duration.ofMillis(500);
 
     @Mock
     private UrlRepository urlRepository;
@@ -85,12 +95,15 @@ class DefaultSafeBrowsingRecheckServiceTest {
 
     private final Map<Long, Url> database = new TreeMap<>();
     private final List<Long> stamped = new ArrayList<>();
+    private final Set<String> flagged = new HashSet<>();
+    private final List<Duration> sleeps = new ArrayList<>();
+    private final HostPacer.Sleeper sleeper = sleeps::add;
     private final DefaultSettingsService settingsService = SettingsServiceFixtures.defaults(new AppProperties());
 
     @BeforeEach
     void setUp() {
         recheckService = new DefaultSafeBrowsingRecheckService(urlRepository, safeBrowsingService, linkCheckService, moderationService,
-                reviewQueueService, redirectChainService, settingsService);
+                reviewQueueService, redirectChainService, settingsService, CLOCK, sleeper);
         LongStream.rangeClosed(1, 45).forEach(id -> database.put(id,
                 Url.builder().id(id).shortUrl("s" + id).longUrl("https://site" + id + ".example").active(true).build()));
         lenient().when(urlRepository.findActiveIds()).thenAnswer(invocation -> new ArrayList<>(database.keySet()));
@@ -126,7 +139,10 @@ class DefaultSafeBrowsingRecheckServiceTest {
             }
             return null;
         }).when(moderationService).blockLink(anyLong(), any(BlockReason.class), any(), anyString(), anyString());
-        lenient().when(safeBrowsingService.checkUrlsForThreats(anyString())).thenReturn(List.of());
+        lenient().when(safeBrowsingService.checkUrlsForThreats(anyList()))
+                .thenAnswer(invocation -> invocation.<List<String>>getArgument(0).stream().filter(flagged::contains).toList());
+        lenient().when(safeBrowsingService.checkUrlsForThreats(anyString()))
+                .thenAnswer(invocation -> flagged.contains(invocation.<String>getArgument(0)) ? List.of(invocation.<String>getArgument(0)) : List.of());
         lenient().when(linkCheckService.check(anyString())).thenReturn(LinkVerdict.clean());
         lenient().when(redirectChainService.check(anyLong())).thenReturn(RedirectChainService.Result.CHECKED);
     }
@@ -162,7 +178,7 @@ class DefaultSafeBrowsingRecheckServiceTest {
     void aSafeBrowsingDetailNamesEachThreatOnceAndLeavesTheFittingToModeration() {
         final var longUrl = "https://site14.example/" + "a".repeat(300);
         database.get(14L).setLongUrl(longUrl);
-        when(safeBrowsingService.checkUrlsForThreats(longUrl)).thenReturn(List.of(longUrl));
+        flagged.addAll(List.of(longUrl, "https://site15.example"));
         when(safeBrowsingService.checkUrlsForThreats("https://site15.example")).thenReturn(List.of("https://site15.example", "https://site15.example"));
 
         recheckService.recheckActiveUrls();
@@ -219,7 +235,7 @@ class DefaultSafeBrowsingRecheckServiceTest {
 
         recheckService.recheckActiveUrls();
 
-        verify(safeBrowsingService).checkUrlsForThreats("https://site16.example");
+        verify(safeBrowsingService).checkUrlsForThreats(chunkWith("https://site16.example"));
         verify(moderationService).blockLink(12L, BlockReason.SAFE_BROWSING, "https://site12.example", "system", "nightly");
         verify(moderationService, times(1)).blockLink(anyLong(), any(BlockReason.class), any(), anyString(), anyString());
         assertThat(database.get(16L).isActive()).isTrue();
@@ -273,6 +289,7 @@ class DefaultSafeBrowsingRecheckServiceTest {
 
         recheckService.recheckActiveUrls();
 
+        verify(safeBrowsingService, never()).checkUrlsForThreats(chunkWith("https://site3.example"));
         verify(safeBrowsingService, never()).checkUrlsForThreats("https://site3.example");
         verify(linkCheckService, never()).check("https://site3.example");
         assertThat(stamped).doesNotContain(3L);
@@ -295,14 +312,15 @@ class DefaultSafeBrowsingRecheckServiceTest {
     @Test
     void whenSafeBrowsingIsDownTheListsStillApplyToEveryLinkAndNothingIsStampedAsChecked() {
         final var reasons = List.of("on list Phishing.Database domains");
-        when(safeBrowsingService.checkUrlsForThreats(anyString())).thenThrow(new SafeBrowsingUnavailableException(SAFE_BROWSING_DOWN));
+        when(safeBrowsingService.checkUrlsForThreats(anyList())).thenThrow(new SafeBrowsingUnavailableException(SAFE_BROWSING_DOWN));
         verdict(3L, blocked(BlockReason.BLOCKLIST, "URLhaus"));
         verdict(11L, new LinkVerdict(Outcome.FLAG, reasons, null, null));
         verdict(44L, blocked(BlockReason.DOMAIN_RULE, "jofogas.cards"));
 
         assertThatThrownBy(recheckService::recheckActiveUrls).isInstanceOf(JobFailedException.class).hasMessage(SCAN_FAILED);
 
-        verify(safeBrowsingService, times(1)).checkUrlsForThreats(anyString());
+        verify(safeBrowsingService, times(1)).checkUrlsForThreats(anyList());
+        verify(safeBrowsingService, never()).checkUrlsForThreats(anyString());
         verify(linkCheckService, times(45)).check(anyString());
         verify(moderationService).blockLink(3L, BlockReason.BLOCKLIST, "URLhaus", "system", "nightly");
         verify(moderationService).blockLink(44L, BlockReason.DOMAIN_RULE, "jofogas.cards", "system", "nightly");
@@ -313,18 +331,128 @@ class DefaultSafeBrowsingRecheckServiceTest {
     }
 
     @Test
-    void safeBrowsingGoingDownMidScanStampsOnlyTheLinksItReallyChecked() {
+    void safeBrowsingGoingDownMidScanStampsOnlyTheChunksItAnswered() {
+        when(safeBrowsingService.checkUrlsForThreats(chunkWith("https://site25.example"))).thenThrow(new SafeBrowsingUnavailableException(SAFE_BROWSING_DOWN));
+
+        assertThatThrownBy(recheckService::recheckActiveUrls).isInstanceOf(JobFailedException.class).hasMessage(SCAN_FAILED);
+
+        verify(safeBrowsingService, times(2)).checkUrlsForThreats(anyList());
+        verify(linkCheckService, times(45)).check(anyString());
+        assertThat(stamped).containsExactlyElementsOf(LongStream.rangeClosed(1, 20).boxed().toList());
+    }
+
+    @Test
+    void looksUpEachChunkOfLinksInOneRequest() {
+        recheckService.recheckActiveUrls();
+
+        final var chunks = ArgumentCaptor.<List<String>>captor();
+        verify(safeBrowsingService, times(3)).checkUrlsForThreats(chunks.capture());
+        assertThat(chunks.getAllValues()).extracting(List::size).containsExactly(20, 20, 5);
+        assertThat(chunks.getAllValues().getFirst()).startsWith("https://site1.example", "https://site2.example");
+        verify(safeBrowsingService, never()).checkUrlsForThreats(anyString());
+        assertThat(stamped).hasSize(45);
+    }
+
+    @Test
+    void aHitInAChunkIsPinnedToItsLinkByLookingUpThatChunksLinksOneByOne() {
+        threat(27L);
+
+        recheckService.recheckActiveUrls();
+
+        verify(safeBrowsingService, times(20)).checkUrlsForThreats(anyString());
+        verify(safeBrowsingService).checkUrlsForThreats("https://site21.example");
+        verify(safeBrowsingService).checkUrlsForThreats("https://site40.example");
+        verify(safeBrowsingService, never()).checkUrlsForThreats("https://site20.example");
+        verify(safeBrowsingService, never()).checkUrlsForThreats("https://site41.example");
+        verify(moderationService).blockLink(27L, BlockReason.SAFE_BROWSING, "https://site27.example", "system", "nightly");
+        verify(moderationService, times(1)).blockLink(anyLong(), any(BlockReason.class), any(), anyString(), anyString());
+        assertThat(stamped).hasSize(45);
+    }
+
+    @Test
+    void safeBrowsingGoingDownWhilePinningAHitStampsOnlyTheLinksItAnswered() {
+        threat(7L);
         when(safeBrowsingService.checkUrlsForThreats("https://site5.example")).thenThrow(new SafeBrowsingUnavailableException(SAFE_BROWSING_DOWN));
 
         assertThatThrownBy(recheckService::recheckActiveUrls).isInstanceOf(JobFailedException.class).hasMessage(SCAN_FAILED);
 
+        verify(safeBrowsingService, times(1)).checkUrlsForThreats(anyList());
         verify(safeBrowsingService, times(5)).checkUrlsForThreats(anyString());
         verify(linkCheckService, times(45)).check(anyString());
+        verify(moderationService, never()).blockLink(anyLong(), any(BlockReason.class), any(), anyString(), anyString());
         assertThat(stamped).containsExactly(1L, 2L, 3L, 4L);
     }
 
     @Test
-    void afterTheScanFollowsTheRedirectsOfUpToFiveHundredLinksNotCheckedForAWeekOldestFirst() {
+    void aThreatGoogleNamesByAnExpressionOfTheUrlIsStillPinnedToItsLink() {
+        when(safeBrowsingService.checkUrlsForThreats(chunkWith("https://site27.example"))).thenReturn(List.of("site27.example/"));
+        when(safeBrowsingService.checkUrlsForThreats("https://site27.example")).thenReturn(List.of("site27.example/"));
+
+        recheckService.recheckActiveUrls();
+
+        verify(moderationService).blockLink(27L, BlockReason.SAFE_BROWSING, "site27.example/", "system", "nightly");
+        verify(moderationService, times(1)).blockLink(anyLong(), any(BlockReason.class), any(), anyString(), anyString());
+        assertThat(stamped).hasSize(45);
+    }
+
+    @Test
+    void linksSharingADestinationAreAskedAboutItOnceAndAreBothBlocked() {
+        database.get(30L).setLongUrl("https://shared.example");
+        database.get(31L).setLongUrl("https://shared.example");
+        flagged.add("https://shared.example");
+
+        recheckService.recheckActiveUrls();
+
+        final var chunks = ArgumentCaptor.<List<String>>captor();
+        verify(safeBrowsingService, times(3)).checkUrlsForThreats(chunks.capture());
+        assertThat(chunks.getAllValues().get(1)).hasSize(19).containsOnlyOnce("https://shared.example");
+        verify(moderationService).blockLink(30L, BlockReason.SAFE_BROWSING, "https://shared.example", "system", "nightly");
+        verify(moderationService).blockLink(31L, BlockReason.SAFE_BROWSING, "https://shared.example", "system", "nightly");
+        assertThat(stamped).hasSize(45).contains(30L, 31L);
+    }
+
+    @Test
+    void aChunkThreatThatNoLinkConfirmsAloneIsLoggedAndBlocksNothing() {
+        when(safeBrowsingService.checkUrlsForThreats(chunkWith("https://site3.example"))).thenReturn(List.of("gone.example/"));
+        final var logs = new ListAppender<ILoggingEvent>();
+        logs.start();
+        final var logger = (Logger) LoggerFactory.getLogger(DefaultSafeBrowsingRecheckService.class);
+        logger.addAppender(logs);
+
+        try {
+            recheckService.recheckActiveUrls();
+        } finally {
+            logger.detachAppender(logs);
+        }
+
+        verify(safeBrowsingService, times(20)).checkUrlsForThreats(anyString());
+        verify(moderationService, never()).blockLink(anyLong(), any(BlockReason.class), any(), anyString(), anyString());
+        assertThat(stamped).hasSize(45);
+        assertThat(logs.list).extracting(ILoggingEvent::getFormattedMessage)
+                .contains("Safe Browsing named a threat for a chunk but for none of its links alone fromUrlId=1 links=20 threats=[gone.example/]");
+    }
+
+    @Test
+    void pacesTheOneByOneLookupsOnTheSameTurnsAsTheRest() {
+        threat(27L);
+        when(urlRepository.findIdsDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(List.of(12L, 40L));
+
+        recheckService.recheckActiveUrls();
+
+        assertThat(sleeps).containsExactlyElementsOf(IntStream.rangeClosed(1, 24).mapToObj(PACE::multipliedBy).toList());
+    }
+
+    @Test
+    void pacesItsSafeBrowsingRequestsHalfASecondApart() {
+        when(urlRepository.findIdsDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(List.of(12L, 40L));
+
+        recheckService.recheckActiveUrls();
+
+        assertThat(sleeps).containsExactly(PACE, PACE.multipliedBy(2), PACE.multipliedBy(3), PACE.multipliedBy(4));
+    }
+
+    @Test
+    void afterTheScanFollowsTheRedirectsOfUpToThreeHundredLinksNotCheckedForAWeekOldestFirst() {
         when(urlRepository.findIdsDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(List.of(12L, 3L, 40L));
         final var earliest = LocalDateTime.now().minusDays(7);
 
@@ -340,7 +468,7 @@ class DefaultSafeBrowsingRecheckServiceTest {
         order.verify(redirectChainService).check(40L);
         assertThat(checkedBefore.getValue()).isBetween(earliest, LocalDateTime.now().minusDays(7));
         assertThat(page.getValue().getPageNumber()).isZero();
-        assertThat(page.getValue().getPageSize()).isEqualTo(500);
+        assertThat(page.getValue().getPageSize()).isEqualTo(300);
         verify(urlRepository, never()).saveAll(anyIterable());
         verify(urlRepository, never()).save(any(Url.class));
     }
@@ -357,7 +485,7 @@ class DefaultSafeBrowsingRecheckServiceTest {
 
     @Test
     void whenSafeBrowsingFailedDuringTheScanTheRedirectChecksWaitForTheNextNight() {
-        when(safeBrowsingService.checkUrlsForThreats("https://site5.example")).thenThrow(new SafeBrowsingUnavailableException(SAFE_BROWSING_DOWN));
+        when(safeBrowsingService.checkUrlsForThreats(chunkWith("https://site25.example"))).thenThrow(new SafeBrowsingUnavailableException(SAFE_BROWSING_DOWN));
 
         assertThatThrownBy(recheckService::recheckActiveUrls).isInstanceOf(JobFailedException.class).hasMessage(SCAN_FAILED);
 
@@ -395,7 +523,7 @@ class DefaultSafeBrowsingRecheckServiceTest {
 
     @Test
     void shortenerLinksAreFollowedOnTopOfTheWeeklyBudget() {
-        final var weekly = LongStream.rangeClosed(1000, 1499).boxed().toList();
+        final var weekly = LongStream.rangeClosed(1000, 1299).boxed().toList();
         when(urlRepository.findIdsDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(weekly);
         when(urlRepository.findIdsOfShortenerLinksDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(List.of(7000L, 7001L, 7002L));
         final var earliest = LocalDateTime.now().minusDays(1);
@@ -406,8 +534,8 @@ class DefaultSafeBrowsingRecheckServiceTest {
         final var page = ArgumentCaptor.forClass(Pageable.class);
         verify(urlRepository).findIdsOfShortenerLinksDueForRedirectCheck(checkedBefore.capture(), page.capture());
         assertThat(checkedBefore.getValue()).isBetween(earliest, LocalDateTime.now().minusDays(1));
-        assertThat(page.getValue().getPageSize()).isEqualTo(500);
-        verify(redirectChainService, times(503)).check(anyLong());
+        assertThat(page.getValue().getPageSize()).isEqualTo(200);
+        verify(redirectChainService, times(303)).check(anyLong());
         verify(redirectChainService).check(7000L);
         verify(redirectChainService).check(7002L);
     }
@@ -426,7 +554,7 @@ class DefaultSafeBrowsingRecheckServiceTest {
 
     @Test
     void leftoverShortenerLinksAreLogged() {
-        final var ids = LongStream.rangeClosed(1000, 1499).boxed().toList();
+        final var ids = LongStream.rangeClosed(1000, 1199).boxed().toList();
         when(urlRepository.findIdsOfShortenerLinksDueForRedirectCheck(any(LocalDateTime.class), any(Pageable.class))).thenReturn(ids);
         final var checksDone = new java.util.concurrent.atomic.AtomicInteger();
         when(redirectChainService.check(anyLong())).thenAnswer(invocation -> {
@@ -434,7 +562,7 @@ class DefaultSafeBrowsingRecheckServiceTest {
             return RedirectChainService.Result.CHECKED;
         });
         when(urlRepository.countShortenerLinksDueForRedirectCheck(any(LocalDateTime.class)))
-                .thenAnswer(invocation -> 600L - checksDone.get());
+                .thenAnswer(invocation -> 300L - checksDone.get());
         final var logs = new ListAppender<ILoggingEvent>();
         logs.start();
         final var logger = (Logger) LoggerFactory.getLogger(DefaultSafeBrowsingRecheckService.class);
@@ -480,8 +608,11 @@ class DefaultSafeBrowsingRecheckServiceTest {
     }
 
     private void threat(final long id) {
-        final var longUrl = database.get(id).getLongUrl();
-        when(safeBrowsingService.checkUrlsForThreats(longUrl)).thenReturn(List.of(longUrl));
+        flagged.add(database.get(id).getLongUrl());
+    }
+
+    private static List<String> chunkWith(final String longUrl) {
+        return argThat(urls -> urls != null && urls.contains(longUrl));
     }
 
     private void verdict(final long id, final LinkVerdict verdict) {

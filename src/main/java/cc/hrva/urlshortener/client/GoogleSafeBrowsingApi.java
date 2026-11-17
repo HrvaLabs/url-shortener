@@ -4,6 +4,7 @@ import cc.hrva.urlshortener.configuration.properties.GoogleApiProperties;
 import com.google.api.client.http.HttpMediaType;
 import com.google.api.client.http.HttpStatusCodes;
 import com.google.api.services.safebrowsing.v5.Safebrowsing;
+import com.google.common.collect.Lists;
 import com.google.protobuf.CodedInputStream;
 import com.google.protobuf.WireFormat;
 import java.io.IOException;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class GoogleSafeBrowsingApi {
 
+    private static final int MAX_URLS_PER_REQUEST = 50;
     private static final String PROTOBUF = "application/x-protobuf";
     private static final int TAG_TYPE_BITS = 3;
     private static final int THREATS_TAG = 1 << TAG_TYPE_BITS | WireFormat.WIRETYPE_LENGTH_DELIMITED;
@@ -25,6 +27,14 @@ public class GoogleSafeBrowsingApi {
     private final Safebrowsing safebrowsing;
 
     public List<String> threatUrls(final List<String> urls) throws IOException {
+        final var threats = new ArrayList<String>();
+        for (final var request : Lists.partition(urls, MAX_URLS_PER_REQUEST)) {
+            threats.addAll(threatUrlsOfOneRequest(request));
+        }
+        return List.copyOf(threats);
+    }
+
+    private List<String> threatUrlsOfOneRequest(final List<String> urls) throws IOException {
         final var response = safebrowsing.urls()
                 .search()
                 .setUrls(urls)
