@@ -120,6 +120,12 @@ class ModernMcpServersTest {
             {"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"shorten_url","arguments":{"url":"https://example.com/page","alias":"menu","visitLimit":5,"expiresAt":"2030-06-30T21:59:00Z","tags":["work"]},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}""";
     private static final String CHECK_URL_CALL = """
             {"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"check_url","arguments":{"url":"https://evil.example/login?token=abc"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}""";
+    private static final String RESOURCES_LIST = """
+            {"jsonrpc":"2.0","id":9,"method":"resources/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}""";
+    private static final String RESOURCE_TEMPLATES_LIST = """
+            {"jsonrpc":"2.0","id":10,"method":"resources/templates/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}""";
+    private static final String PROMPTS_LIST = """
+            {"jsonrpc":"2.0","id":11,"method":"prompts/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}""";
     private static final String UNKNOWN_METHOD = """
             {"jsonrpc":"2.0","id":4,"method":"links/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}""";
     private static final String FUTURE_VERSION_DISCOVER = """
@@ -206,6 +212,33 @@ class ModernMcpServersTest {
         assertThat(JsonPath.<Number>read(body, "$.result.ttlMs").longValue()).isEqualTo(300_000L);
         assertThat(JsonPath.<String>read(body, "$.result.cacheScope")).isEqualTo("private");
         assertThat(JsonPath.<Map<String, Object>>read(body, "$.result.capabilities")).containsKey("tools");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {MCP, ADMIN})
+    void discoverAdvertisesToolsResourcesAndPromptsOnly(final String endpoint) throws Exception {
+        final var response = send(endpoint, DISCOVER, modernHeaders("server/discover"));
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        final var capabilities = JsonPath.<Map<String, Object>>read(response.getContentAsString(), "$.result.capabilities");
+        assertThat(capabilities).containsKeys("tools", "resources", "prompts").doesNotContainKey("completions");
+        assertThat(JsonPath.<Map<String, Object>>read(response.getContentAsString(), "$.result.capabilities.resources"))
+                .doesNotContainEntry("subscribe", true);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {MCP, ADMIN})
+    void resourceAndPromptDiscoveryAnswerEmptyLists(final String endpoint) throws Exception {
+        final var resources = send(endpoint, RESOURCES_LIST, modernHeaders("resources/list"));
+        final var templates = send(endpoint, RESOURCE_TEMPLATES_LIST, modernHeaders("resources/templates/list"));
+        final var prompts = send(endpoint, PROMPTS_LIST, modernHeaders("prompts/list"));
+
+        assertThat(List.of(resources, templates, prompts)).allSatisfy(response -> assertThat(response.getStatus()).isEqualTo(200));
+        assertThat(JsonPath.<List<Object>>read(resources.getContentAsString(), "$.result.resources")).isEmpty();
+        assertThat(JsonPath.<List<Object>>read(templates.getContentAsString(), "$.result.resourceTemplates")).isEmpty();
+        assertThat(JsonPath.<List<Object>>read(prompts.getContentAsString(), "$.result.prompts")).isEmpty();
+        assertThat(List.of(resources, templates, prompts)).allSatisfy(response ->
+                assertThat(JsonPath.<String>read(response.getContentAsString(), "$.result.resultType")).isEqualTo("complete"));
     }
 
     @Test
