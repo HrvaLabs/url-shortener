@@ -3,11 +3,12 @@ package cc.hrva.urlshortener.service.dnsfilter;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import java.util.List;
 import java.util.Optional;
+import org.xbill.DNS.Rcode;
 
 public final class DnsFilterClassifier {
 
-    private static final int NOERROR = 0;
-    private static final int NXDOMAIN = 3;
+    private static final int NOERROR = Rcode.NOERROR;
+    private static final int NXDOMAIN = Rcode.NXDOMAIN;
     private static final String NO_ANSWER = "no answer";
     private static final String NO_ADDRESS = "no address";
     private static final String NXDOMAIN_TEXT = "NXDOMAIN";
@@ -28,6 +29,9 @@ public final class DnsFilterClassifier {
             return new DnsFilterAnswer(provider, DnsFilterStatus.NO_ANSWER, NO_ANSWER);
         }
         final var dnsReply = reply.get();
+        if (dnsReply.rcode() != NOERROR && dnsReply.rcode() != NXDOMAIN) {
+            return new DnsFilterAnswer(provider, DnsFilterStatus.NO_ANSWER, Rcode.string(dnsReply.rcode()));
+        }
         final var sinkhole = dnsReply.addresses().stream().filter(filter.getBlockAnswers()::contains).findFirst();
         if (sinkhole.isPresent()) {
             return new DnsFilterAnswer(provider, DnsFilterStatus.BLOCKED, sinkhole.get());

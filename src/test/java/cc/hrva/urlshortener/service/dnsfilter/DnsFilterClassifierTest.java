@@ -55,6 +55,20 @@ class DnsFilterClassifierTest {
     }
 
     @Test
+    void servfailIsNoAnswer() {
+        final var answer = DnsFilterClassifier.classify(filter(DnsFilterProvider.QUAD9), Optional.of(new DnsReply(2, List.of())), true);
+
+        assertThat(answer).isEqualTo(new DnsFilterAnswer(DnsFilterProvider.QUAD9, DnsFilterStatus.NO_ANSWER, "SERVFAIL"));
+    }
+
+    @Test
+    void refusedIsNoAnswer() {
+        final var answer = DnsFilterClassifier.classify(filter(DnsFilterProvider.QUAD9), Optional.of(new DnsReply(5, List.of())), true);
+
+        assertThat(answer).isEqualTo(new DnsFilterAnswer(DnsFilterProvider.QUAD9, DnsFilterStatus.NO_ANSWER, "REFUSED"));
+    }
+
+    @Test
     void aMissingDomainIsNeverBlocked() {
         final var answer = DnsFilterClassifier.classify(filter(DnsFilterProvider.QUAD9), Optional.of(NXDOMAIN), false);
 
