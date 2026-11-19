@@ -33,6 +33,7 @@
         <springAiVersion>2.0.2</springAiVersion>
         <mcpSdkVersion>2.2.0</mcpSdkVersion>
         <mcpSecurityVersion>0.1.14</mcpSecurityVersion>
+        <dnsjavaVersion>3.6.3</dnsjavaVersion>
 
         <!-- Newer than Spring Boot 4.1.2 manages; drop each once Boot manages the same or newer -->
         <h2.version>2.5.252</h2.version>
@@ -250,6 +251,13 @@
             <groupId>org.jsoup</groupId>
             <artifactId>jsoup</artifactId>
             <version>${jsoupVersion}</version>
+        </dependency>
+
+        <!-- dnsjava (DNS filter checks against public resolvers) -->
+        <dependency>
+            <groupId>dnsjava</groupId>
+            <artifactId>dnsjava</artifactId>
+            <version>${dnsjavaVersion}</version>
         </dependency>
 
         <!-- Apache HttpClient (outbound fetches pinned to the checked address) -->

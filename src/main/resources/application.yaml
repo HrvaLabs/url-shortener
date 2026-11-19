@@ -153,6 +153,21 @@ app:
     allowed-origins: https://app.hrva.cc
   notifications:
     key: ${APP_NOTIFICATIONS_KEY:}
+  dns-filters:
+    filters:
+      - provider: QUAD9
+        address: 9.9.9.9
+      - provider: CLOUDFLARE
+        address: 1.1.1.2
+        block-answers: 0.0.0.0
+      - provider: CLEANBROWSING
+        address: 185.228.168.9
+      - provider: CONTROL_D
+        address: 76.76.2.1
+        block-answers: 0.0.0.0
+    references:
+      - 9.9.9.10
+      - 1.1.1.1
   destination-check:
     enabled: ${APP_DESTINATION_CHECK_ENABLED:true}
     catch-up-on-startup: ${APP_DESTINATION_CHECK_CATCH_UP_ON_STARTUP:true}

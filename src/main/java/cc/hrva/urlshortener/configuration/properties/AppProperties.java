@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.configuration.properties;
 
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterProvider;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Max;
@@ -177,6 +178,46 @@ public class AppProperties {
     @Valid
     @NotNull
     private Metrics metrics = new Metrics();
+
+    @Valid
+    @NotNull
+    private DnsFilters dnsFilters = new DnsFilters();
+
+    @Data
+    public static class DnsFilters {
+
+        @Valid
+        @NotEmpty
+        private List<Filter> filters = List.of();
+
+        @NotEmpty
+        private List<String> references = List.of();
+
+        @NotNull
+        @DurationMin(millis = 100, message = "must be at least 100 milliseconds")
+        private Duration timeout = Duration.ofSeconds(2);
+
+        @NotNull
+        private Duration pace = Duration.ofSeconds(1);
+
+        @NotNull
+        @DurationMin(minutes = 1, message = "must be at least 1 minute")
+        private Duration cacheFor = Duration.ofHours(1);
+
+        @Data
+        public static class Filter {
+
+            @NotNull
+            private DnsFilterProvider provider;
+
+            @NotBlank
+            private String address;
+
+            private List<String> blockAnswers = List.of();
+
+        }
+
+    }
 
     @Data
     public static class Mcp {
