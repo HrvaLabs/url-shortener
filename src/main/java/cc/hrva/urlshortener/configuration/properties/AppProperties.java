@@ -506,6 +506,15 @@ public class AppProperties {
         private boolean linkScreenshots = true;
         private boolean virusTotalLookups = true;
         private boolean signInFormAccountLinks = true;
+        private boolean dnsFilterCheck = true;
+        private boolean dnsFilterQuad9 = true;
+        private boolean dnsFilterCloudflare = true;
+        private boolean dnsFilterCleanbrowsing = true;
+        private boolean dnsFilterControlD = true;
+
+        @Min(2)
+        @Max(4)
+        private int dnsFiltersToBlock = 2;
 
         @Min(1)
         @Max(90)

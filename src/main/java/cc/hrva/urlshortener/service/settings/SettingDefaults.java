@@ -42,6 +42,12 @@ public class SettingDefaults {
         register(SettingKey.SUSPICIOUS_LINK_CHECK, moderation::isSuspiciousLinkCheck);
         register(SettingKey.NIGHTLY_SAFE_BROWSING, moderation::isNightlySafeBrowsing);
         register(SettingKey.NIGHTLY_DESTINATION_CHECK, () -> appProperties.getDestinationCheck().isEnabled());
+        register(SettingKey.DNS_FILTER_CHECK, moderation::isDnsFilterCheck);
+        register(SettingKey.DNS_FILTERS_TO_BLOCK, moderation::getDnsFiltersToBlock);
+        register(SettingKey.DNS_FILTER_QUAD9, moderation::isDnsFilterQuad9);
+        register(SettingKey.DNS_FILTER_CLOUDFLARE, moderation::isDnsFilterCloudflare);
+        register(SettingKey.DNS_FILTER_CLEANBROWSING, moderation::isDnsFilterCleanbrowsing);
+        register(SettingKey.DNS_FILTER_CONTROL_D, moderation::isDnsFilterControlD);
         register(SettingKey.SAME_SHAPE_ALERT, campaign::isEnabled);
         register(SettingKey.CAMPAIGN_LINKS, campaign::getLinks);
         register(SettingKey.CAMPAIGN_DOMAINS, campaign::getDomains);

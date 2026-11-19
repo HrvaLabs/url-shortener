@@ -1,6 +1,7 @@
 package cc.hrva.urlshortener.service.settings;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterProvider;
 import cc.hrva.urlshortener.exception.FieldValidationException;
 import cc.hrva.urlshortener.security.OAuthProviders;
 import java.util.Arrays;
@@ -543,6 +544,31 @@ class SettingValuesTest {
                         + "v2.37. Turn it off only if an AI app can't call hrva.cc tools.", null, false);
         assertThat(SettingKey.values()[SettingKey.values().length - 1]).isEqualTo(SettingKey.MCP_MODERN);
         assertThat(new SettingDefaults(new AppProperties(), SettingsServiceFixtures.bothProviders()).defaultOf(SettingKey.MCP_MODERN)).isEqualTo(true);
+    }
+
+    @Test
+    void theDnsFilterRows() {
+        assertThat(Arrays.asList(SettingKey.values()).subList(SettingKey.NIGHTLY_DESTINATION_CHECK.ordinal() + 1, SettingKey.SAME_SHAPE_ALERT.ordinal()))
+                .containsExactly(SettingKey.DNS_FILTER_CHECK, SettingKey.DNS_FILTERS_TO_BLOCK, SettingKey.DNS_FILTER_QUAD9, SettingKey.DNS_FILTER_CLOUDFLARE,
+                        SettingKey.DNS_FILTER_CLEANBROWSING, SettingKey.DNS_FILTER_CONTROL_D);
+        assertThat(SettingKey.DNS_FILTER_CHECK).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getLabel, SettingKey::getDescription,
+                        SettingKey::getParent, SettingKey::isSafety)
+                .containsExactly(SettingGroup.SAFETY, SettingType.SWITCH, "Security DNS filter check",
+                        "Checks link destinations against public security DNS filters. Never on a click.", null, true);
+        assertThat(SettingKey.DNS_FILTERS_TO_BLOCK).extracting(SettingKey::getGroup, SettingKey::getType, SettingKey::getParent, SettingKey::isSafety,
+                        SettingKey::getMin, SettingKey::getMax, SettingKey::getUnit)
+                .containsExactly(SettingGroup.SAFETY, SettingType.NUMBER, SettingKey.DNS_FILTER_CHECK, false, 2, 4, "filters");
+        for (final var provider : DnsFilterProvider.values()) {
+            assertThat(provider.settingKey()).extracting(SettingKey::getType, SettingKey::getParent, SettingKey::isSafety)
+                    .containsExactly(SettingType.SWITCH, SettingKey.DNS_FILTER_CHECK, false);
+        }
+        final var defaults = new SettingDefaults(new AppProperties(), SettingsServiceFixtures.bothProviders());
+        assertThat(defaults.defaultOf(SettingKey.DNS_FILTER_CHECK)).isEqualTo(true);
+        assertThat(defaults.defaultOf(SettingKey.DNS_FILTERS_TO_BLOCK)).isEqualTo(2);
+        assertThat(Arrays.stream(DnsFilterProvider.values()).map(provider -> defaults.defaultOf(provider.settingKey()))).containsOnly(true);
+        assertThat(SettingValues.parse(SettingKey.DNS_FILTERS_TO_BLOCK, NODES.numberNode(4))).isEqualTo(4);
+        assertRefused(SettingKey.DNS_FILTERS_TO_BLOCK, NODES.numberNode(1), "Use a number from 2 to 4.");
+        assertRefused(SettingKey.DNS_FILTERS_TO_BLOCK, NODES.numberNode(5), "Use a number from 2 to 4.");
     }
 
     @Test
