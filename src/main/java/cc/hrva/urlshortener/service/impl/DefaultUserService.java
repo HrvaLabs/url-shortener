@@ -121,7 +121,7 @@ public class DefaultUserService implements UserService {
 
         final var verificationToken = verificationTokenService.createTokenForUser(savedUser);
         eventPublisher.publishEvent(new UserRegisteredEvent(savedUser, verificationToken));
-        eventPublisher.publishEvent(new AdminAlertEvent.UserSignedUp(savedUser.getId(), savedUser.getAuthProvider()));
+        eventPublisher.publishEvent(new AdminAlertEvent.UserSignedUp(savedUser.getId(), savedUser.getAuthProvider(), savedUser.getEmail()));
 
         return savedUser;
     }

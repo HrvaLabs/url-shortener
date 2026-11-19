@@ -29,6 +29,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.VisitorReported;
 import cc.hrva.urlshortener.service.digest.WeeklyDigestText;
 import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.util.DomainNames;
+import cc.hrva.urlshortener.util.EmailAddresses;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -138,8 +139,8 @@ public class DiscordAlertFormatter {
                     link(reported.link()), report(reported.category(), reported.details()), owner(reported.link()), reviewPage(reported.link()));
             case LinkBlocked blocked -> "Blocked: %s (%s), %s, <%s>".formatted(
                     link(blocked.link()), blockReason(blocked), owner(blocked.link()), frontendPage(LINKS_PAGE));
-            case UserSignedUp signedUp -> "New user: %s signed up with %s, <%s>".formatted(
-                    signedUp.userId() == null ? "an account" : "account #" + signedUp.userId(),
+            case UserSignedUp signedUp -> "New user: %s%s signed up with %s, <%s>".formatted(
+                    signedUp.userId() == null ? "an account" : "account #" + signedUp.userId(), maskedAddress(signedUp.email()),
                     signUpMethod(signedUp.authProvider()), frontendPage(USERS_PAGE));
             case BlocklistSourceFailed failed -> "%s failed to load: %s%s, <%s>".formatted(
                     plain(failed.sourceName()), plain(failed.error()),
@@ -344,6 +345,10 @@ public class DiscordAlertFormatter {
 
     private static String count(final long amount, final String unit) {
         return amount == 1 ? "1 " + unit : amount + " " + unit + "s";
+    }
+
+    private static String maskedAddress(final String email) {
+        return StringUtils.isBlank(email) ? "" : " (" + DiscordText.literal(EmailAddresses.masked(email)) + ")";
     }
 
     private static String signUpMethod(final String authProvider) {

@@ -180,7 +180,7 @@ class DiscordAlertFormatterTest {
                 new ReviewOpened(new AlertedLink(1L, alias, host, null, null), reasons),
                 new LinkBlocked(new AlertedLink(2L, alias, host, 9L, null), BlockReason.ADMIN, "d".repeat(200)),
                 new BlocklistSourceFailed(sourceName, error, false),
-                new UserSignedUp(3L, "p".repeat(60))), 0).content().lines().toList();
+                new UserSignedUp(3L, "p".repeat(60), null)), 0).content().lines().toList();
 
         assertThat(lines).containsExactly(
                 "New review: hrva.cc/" + alias + " → " + host + " (" + "r".repeat(150) + ", " + "s".repeat(150) + "), no account, "
@@ -206,12 +206,13 @@ class DiscordAlertFormatterTest {
                         "mail victim@example.com, sent from 198.51.100.23 and 2001:db8::7, or [::ffff:192.0.2.9].", false),
                 new ReviewOpened(ANONYMOUS_LINK, List.of("redirects to 192.0.2.1: IP address instead of a domain")),
                 new LinkBlocked(ANONYMOUS_LINK, BlockReason.ADMIN, "reported by owner@example.org from 2001:db8:0:1::5"),
-                new UserSignedUp(31L, "google")), 0).content();
+                new UserSignedUp(31L, "google", "newcomer@mail.test")), 0).content();
 
-        assertThat(content).doesNotContain("@example", "198.51.100.23", "2001:db8", "192.0.2.9", "192.0.2.1");
+        assertThat(content).doesNotContain("@example", "198.51.100.23", "2001:db8", "192.0.2.9", "192.0.2.1", "newcomer@");
+        assertThat(content).contains("n\\*\\*\\*@mail.test");
         assertThat(content).contains("mail (email removed), sent from (IP removed) and (IP removed), or (IP removed).");
         assertThat(content).contains("redirects to (IP removed): IP address instead of a domain");
-        assertThat(content).contains("New user: account #31 signed up with Google");
+        assertThat(content).contains("New user: account #31 (n\\*\\*\\*@mail.test) signed up with Google");
     }
 
     @Test
@@ -325,8 +326,8 @@ class DiscordAlertFormatterTest {
                 new LinkBlocked(new AlertedLink(31L, "s31", "example.org", 7L, null), BlockReason.SAFE_BROWSING, "https://malware.example/a"),
                 new LinkBlocked(new AlertedLink(32L, "s32", "jofogas.cards", null, null), BlockReason.DOMAIN_RULE, "jofogas.cards"),
                 new LinkBlocked(new AlertedLink(33L, "s33", "example.net", null, null), BlockReason.ADMIN, null),
-                new UserSignedUp(31L, "local"),
-                new UserSignedUp(32L, "github"),
+                new UserSignedUp(31L, "local", null),
+                new UserSignedUp(32L, "github", null),
                 new BlocklistSourceFailed("HaGeZi TIF medium", "main: HTTP 503", true),
                 new BlocklistSourceFailed("URLhaus", "HTTP 410", false),
                 new BlocklistSourceRecovered("HaGeZi TIF medium")), 0).content();
@@ -359,7 +360,7 @@ class DiscordAlertFormatterTest {
 
     @Test
     void alertsDroppedFromAFullBufferCountTowardTheRest() {
-        final var lines = formatter.message(List.of(new UserSignedUp(31L, "local"), new BlocklistSourceRecovered("URLhaus")), 5)
+        final var lines = formatter.message(List.of(new UserSignedUp(31L, "local", null), new BlocklistSourceRecovered("URLhaus")), 5)
                 .content().lines().toList();
 
         assertThat(lines).hasSize(3);
@@ -410,7 +411,7 @@ class DiscordAlertFormatterTest {
     @Test
     void aMixedBatchOrDroppedAlertsKeepTheReviewPageInTheOverflow() {
         final var mixed = new ArrayList<AdminAlertEvent>(IntStream.range(0, 7).mapToObj(ignored -> longShapeHeld()).toList());
-        mixed.add(new UserSignedUp(31L, "local"));
+        mixed.add(new UserSignedUp(31L, "local", null));
 
         final var mixedLines = formatter.message(mixed, 0).content().lines().toList();
         final var droppedLines = formatter.message(List.of(longShapeHeld()), 2).content().lines().toList();
@@ -455,7 +456,7 @@ class DiscordAlertFormatterTest {
 
         final var content = formatter.message(List.of(
                 new ReviewOpened(new AlertedLink(1L, "abc12", host, null, null), List.of("high-risk domain ending .example")),
-                new UserSignedUp(31L, "local")), 0).content();
+                new UserSignedUp(31L, "local", null)), 0).content();
 
         assertThat(content).isEqualTo("New user: account #31 signed up with email, <https://app.hrva.cc/admin>\n"
                 + "and 1 more, see " + REVIEW_PAGE);
@@ -466,7 +467,7 @@ class DiscordAlertFormatterTest {
         final var host = "h".repeat(1990) + ".example";
 
         final var lines = formatter.message(List.of(
-                new UserSignedUp(31L, "local"),
+                new UserSignedUp(31L, "local", null),
                 new ReviewOpened(new AlertedLink(1L, "abc12", host, null, null), List.of("high-risk domain ending .example")),
                 new BlocklistSourceRecovered("URLhaus"),
                 new BurstDetected("evil-login.com", 5, 2, 4, Duration.ofHours(1))), 0).content().lines().toList();
@@ -1048,4 +1049,40 @@ class DiscordAlertFormatterTest {
                 topLinks);
     }
 
+
+    @Test
+    void newUserLineShowsTheMaskedAddress() {
+        final var content = formatter.message(List.of(new UserSignedUp(31L, "google", "karlo@gmail.com")), 0).content();
+
+        assertThat(content).isEqualTo("New user: account #31 (k\\*\\*\\*@gmail.com) signed up with Google, <https://app.hrva.cc/admin>");
+    }
+
+    @Test
+    void newUserLineWithoutAnAddressIsUnchanged() {
+        final var content = formatter.message(List.of(new UserSignedUp(31L, "local", null)), 0).content();
+
+        assertThat(content).isEqualTo("New user: account #31 signed up with email, <https://app.hrva.cc/admin>");
+    }
+
+    @Test
+    void maskedAddressIsEscaped() {
+        final var content = formatter.message(List.of(new UserSignedUp(31L, "local", "*bold@example.com")), 0).content();
+
+        assertThat(DiscordText.literal("****@example.com")).isNotEqualTo("****@example.com");
+        assertThat(content).contains("(" + DiscordText.literal("****@example.com") + ")");
+    }
+
+    @Test
+    void maskedAddressKeepsAWholeFirstCharacter() {
+        final var content = formatter.message(List.of(new UserSignedUp(31L, "local", "\u017eana@example.hr")), 0).content();
+
+        assertThat(content).contains("(\u017e\\*\\*\\*@example.hr)");
+    }
+
+    @Test
+    void anAccountWithoutAnIdStillShowsTheAddress() {
+        final var content = formatter.message(List.of(new UserSignedUp(null, "github", "a@b.test")), 0).content();
+
+        assertThat(content).isEqualTo("New user: an account (a\\*\\*\\*@b.test) signed up with GitHub, <https://app.hrva.cc/admin>");
+    }
 }

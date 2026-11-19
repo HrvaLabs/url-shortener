@@ -4,6 +4,15 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.38] — 2026-11-20
+
+New accounts show in Discord with their email address, masked.
+
+### 🔧 Admin
+- The Discord alert for a new account shows its email address, masked (k***@gmail.com), like the New user email. You can turn off the New user notice, Admin daily email and Weekly digest by email in Site settings and keep these in Discord.
+
+---
+
 ## [v2.37] — 2026-11-17
 
 AI apps can connect with the newest MCP version.

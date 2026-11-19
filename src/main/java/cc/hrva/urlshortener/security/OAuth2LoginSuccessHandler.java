@@ -207,7 +207,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
         final var saved = userRepository.save(newUser);
         log.info("Created OAuth2 user email={} user id={}", EmailAddresses.masked(email), saved.getId());
         eventPublisher.publishEvent(new UserRegisteredEvent(saved, null));
-        eventPublisher.publishEvent(new AdminAlertEvent.UserSignedUp(saved.getId(), provider));
+        eventPublisher.publishEvent(new AdminAlertEvent.UserSignedUp(saved.getId(), provider, email));
         return saved;
     }
 

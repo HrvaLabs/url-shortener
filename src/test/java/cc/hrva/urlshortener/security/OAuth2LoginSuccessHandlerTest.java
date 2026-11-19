@@ -251,7 +251,7 @@ class OAuth2LoginSuccessHandlerTest {
     }
 
     @Test
-    void aNewAccountAlertsTheAdminWithItsIdAndProviderButNotItsEmail() throws Exception {
+    void aNewAccountAlertsTheAdminWithItsIdProviderAndEmail() throws Exception {
         when(oAuth2User.getAttribute("email")).thenReturn("new@example.com");
         when(userRepository.findByEmail("new@example.com")).thenReturn(Optional.empty());
         when(authoritiesService.getDefaultAuthority())
@@ -266,7 +266,7 @@ class OAuth2LoginSuccessHandlerTest {
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
-        verify(eventPublisher).publishEvent(new AdminAlertEvent.UserSignedUp(31L, "google"));
+        verify(eventPublisher).publishEvent(new AdminAlertEvent.UserSignedUp(31L, "google", "new@example.com"));
     }
 
     @Test
@@ -287,7 +287,7 @@ class OAuth2LoginSuccessHandlerTest {
         handler.onAuthenticationSuccess(request, response, gitHub);
 
         verify(userRepository, atLeastOnce()).save(argThat(saved -> "github".equals(saved.getAuthProvider())));
-        verify(eventPublisher).publishEvent(new AdminAlertEvent.UserSignedUp(32L, "github"));
+        verify(eventPublisher).publishEvent(new AdminAlertEvent.UserSignedUp(32L, "github", "octo@example.com"));
     }
 
     @Test

@@ -15,7 +15,7 @@ public sealed interface AdminAlertEvent {
 
     record LinkBlocked(AlertedLink link, BlockReason reason, String detail) implements AdminAlertEvent {}
 
-    record UserSignedUp(Long userId, String authProvider) implements AdminAlertEvent {}
+    record UserSignedUp(Long userId, String authProvider, String email) implements AdminAlertEvent {}
 
     record BlocklistSourceFailed(String sourceName, String error, boolean fallbackLoaded) implements AdminAlertEvent {}
 

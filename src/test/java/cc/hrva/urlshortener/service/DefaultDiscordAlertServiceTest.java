@@ -60,7 +60,7 @@ import static org.mockito.Mockito.when;
 class DefaultDiscordAlertServiceTest {
 
     private static final String WEBHOOK_URL = "https://discord.com/api/webhooks/1234567890/s3cr3t-w3bh00k-t0k3n";
-    private static final AdminAlertEvent NEW_USER = new AdminAlertEvent.UserSignedUp(31L, "local");
+    private static final AdminAlertEvent NEW_USER = new AdminAlertEvent.UserSignedUp(31L, "local", null);
     private static final AdminAlertEvent NEW_REVIEW = new AdminAlertEvent.ReviewOpened(
             new AlertedLink(42L, "abc12", "example-login.top", null, null), List.of("imitates paypal", "domain registered in the last 30 days"));
     private static final AdminAlertEvent BLOCKED = new AdminAlertEvent.LinkBlocked(

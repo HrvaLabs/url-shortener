@@ -325,13 +325,13 @@ class DefaultUserServiceTest {
     }
 
     @Test
-    void aRegistrationAlertsTheAdminWithTheAccountIdButNotTheEmail() {
+    void aRegistrationAlertsTheAdminWithTheAccountIdAndEmail() {
         final var user = User.builder().id(31L).email("test@example.com").authProvider("local").build();
         when(userRepository.save(user)).thenReturn(user);
 
         userService.register(user);
 
-        verify(eventPublisher).publishEvent(new AdminAlertEvent.UserSignedUp(31L, "local"));
+        verify(eventPublisher).publishEvent(new AdminAlertEvent.UserSignedUp(31L, "local", "test@example.com"));
     }
 
     @Test
