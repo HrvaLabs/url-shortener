@@ -4,6 +4,18 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.39] — 2026-11-20
+
+Links are also checked against security DNS filters.
+
+### 🔑 Improvements
+- Links are also checked against public security DNS filters, and blocked when several of them agree.
+
+### 🔧 Admin
+- New settings under Safety: the security DNS filter check, how many filters must agree and each filter on or off. The URL check and the MCP check_url tool show each filter's answer.
+
+---
+
 ## [v2.38] — 2026-11-20
 
 New accounts show in Discord with their email address, masked.
