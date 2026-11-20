@@ -31,11 +31,14 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.core.env.MutablePropertySources;
 import org.springframework.core.env.PropertySourcesPropertyResolver;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.support.CronExpression;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -254,6 +257,21 @@ class DefaultScheduledServiceTest {
 
         verify(dnsFilterCheckService).sweep();
         assertThat(output).contains("Scheduled: DNS filter sweep");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aDnsFilterRunTheFullQueueRejectsIsDroppedWithOneInfoLine(final CapturedOutput output) {
+        doThrow(new TaskRejectedException("Executor did not accept the task")).when(dnsFilterCheckService).recheckFresh();
+        doThrow(new TaskRejectedException("Executor did not accept the task")).when(dnsFilterCheckService).sweep();
+
+        assertThatCode(scheduledService::recheckFreshLinksWithDnsFilters).doesNotThrowAnyException();
+        assertThatCode(scheduledService::sweepDnsFilters).doesNotThrowAnyException();
+
+        final var dropped = output.getOut().lines().filter(line -> line.contains("its queue is full")).toList();
+        assertThat(dropped).hasSize(2).allMatch(line -> line.contains("INFO"));
+        assertThat(dropped.getFirst()).contains("DNS filter recheck dropped, its queue is full");
+        assertThat(dropped.getLast()).contains("DNS filter sweep dropped, its queue is full");
     }
 
     @Test

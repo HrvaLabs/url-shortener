@@ -36,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -319,6 +320,39 @@ class DefaultDnsFilterCheckServiceTest {
         verify(dnsFilterService).lookup("evil.example");
         verify(ownHostsCheck).run();
         assertThat(output.getOut()).contains("DNS filter sweep finished links=3 results={BLOCKED=0, FLAGGED=1, CLEAN=1, RETRY=0, SKIPPED=1}");
+    }
+
+    @Test
+    void twoLinksToOneHostAreLookedUpOncePerSweepEvenWithoutTheCache() {
+        when(urlRepository.findActiveIds()).thenReturn(List.of(LINK_ID, 8L));
+        when(urlRepository.findById(8L)).thenReturn(Optional.of(Url.builder().id(8L).shortUrl("def").longUrl("https://" + HOST + "/2").active(true).build()));
+        when(dnsFilterService.lookup(HOST)).thenReturn(report(HOST, answer(QUAD9, BLOCKED), answer(CLOUDFLARE, NOT_BLOCKED)));
+
+        service.sweep();
+
+        verify(dnsFilterService, times(1)).lookup(HOST);
+        verify(reviewQueueService, times(2)).flag(any(), eq(List.of("blocked by DNS filter Quad9")));
+    }
+
+    @Test
+    void twoLinksToOneHostAreLookedUpOncePerRecheck() {
+        when(urlRepository.findActiveIdsCreatedBetween(LocalDateTime.of(2026, 11, 19, 10, 45), LocalDateTime.of(2026, 11, 19, 11, 0))).thenReturn(List.of(LINK_ID, 8L));
+        when(urlRepository.findById(8L)).thenReturn(Optional.of(Url.builder().id(8L).shortUrl("def").longUrl("https://" + HOST + "/2").active(true).build()));
+        when(dnsFilterService.lookup(HOST)).thenReturn(report(HOST, answer(QUAD9, NOT_BLOCKED), answer(CLOUDFLARE, NO_ANSWER)));
+
+        service.recheckFresh();
+
+        verify(dnsFilterService, times(1)).lookup(HOST);
+    }
+
+    @Test
+    void separateChecksOfOneHostEachAskTheLookup() {
+        when(dnsFilterService.lookup(HOST)).thenReturn(report(HOST, answer(QUAD9, NOT_BLOCKED)));
+
+        service.check(LINK_ID);
+        service.check(LINK_ID);
+
+        verify(dnsFilterService, times(2)).lookup(HOST);
     }
 
     @Test

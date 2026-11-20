@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.Arrays;
 import java.util.Collection;
@@ -58,6 +59,10 @@ public class DefaultDnsFilterCheckService implements DnsFilterCheckService {
 
     @Override
     public DnsFilterCheckResult check(final long urlId) {
+        return check(urlId, new HashMap<>());
+    }
+
+    private DnsFilterCheckResult check(final long urlId, final Map<String, DnsFilterReport> reports) {
         final var url = urlRepository.findById(urlId).filter(Url::isActive);
         if (url.isEmpty() || !isChecked(url.get())) {
             log.info("Link is not checked against the DNS filters urlId={}", urlId);
@@ -73,7 +78,7 @@ public class DefaultDnsFilterCheckService implements DnsFilterCheckService {
         final var reasons = new ArrayList<String>();
         var unanswered = false;
         for (final var host : hostsOf(url.get(), destination.get())) {
-            final var report = dnsFilterService.lookup(host);
+            final var report = reports.computeIfAbsent(host, dnsFilterService::lookup);
             if (!report.exists()) {
                 continue;
             }
@@ -157,10 +162,11 @@ public class DefaultDnsFilterCheckService implements DnsFilterCheckService {
     private Map<DnsFilterCheckResult, Integer> checkAll(final Collection<Long> ids) {
         final var results = new EnumMap<DnsFilterCheckResult, Integer>(DnsFilterCheckResult.class);
         Arrays.stream(DnsFilterCheckResult.values()).forEach(result -> results.put(result, 0));
+        final var reports = new HashMap<String, DnsFilterReport>();
         var failed = 0;
         for (final var id : ids) {
             try {
-                results.merge(check(id), 1, Integer::sum);
+                results.merge(check(id, reports), 1, Integer::sum);
             } catch (final RuntimeException exception) {
                 failed++;
                 log.warn("Could not check a link against the DNS filters urlId={}", id, exception);

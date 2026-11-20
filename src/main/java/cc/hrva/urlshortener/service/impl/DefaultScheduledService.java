@@ -28,6 +28,7 @@ import cc.hrva.urlshortener.service.domain.CustomDomainReconciler;
 import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
 import java.time.Clock;
 import java.time.LocalDateTime;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -235,14 +236,22 @@ public class DefaultScheduledService implements ScheduledService {
     @Scheduled(cron = "0 */15 * * * *")
     public void recheckFreshLinksWithDnsFilters() {
         log.info("Scheduled: DNS filter recheck of new links");
-        dnsFilterCheckService.recheckFresh();
+        try {
+            dnsFilterCheckService.recheckFresh();
+        } catch (final TaskRejectedException exception) {
+            log.info("DNS filter recheck dropped, its queue is full");
+        }
     }
 
     @Override
     @Scheduled(cron = "0 30 5 * * *")
     public void sweepDnsFilters() {
         log.info("Scheduled: DNS filter sweep");
-        dnsFilterCheckService.sweep();
+        try {
+            dnsFilterCheckService.sweep();
+        } catch (final TaskRejectedException exception) {
+            log.info("DNS filter sweep dropped, its queue is full");
+        }
     }
 
 }
