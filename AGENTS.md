@@ -404,7 +404,7 @@ Custom domains add fields at the end of existing answers, each `NON_NULL` (absen
 ## MCP connector
 AI apps (Claude, Claude Code, the MCP Inspector) use hrva.cc over MCP. The app is its own OAuth 2.1 authorization server (Spring Authorization Server through `mcp-authorization-server` 0.1.14), protects `/mcp` and `/mcp/admin` as resource servers (`mcp-server-security` 0.1.14) and serves the tools from Spring AI 2.0.2's MCP server (`/mcp`) and a second stateless server built beside it (`/mcp/admin`, `mcp/admin/AdminMcpServerConfiguration`). Code: `cc.hrva.urlshortener.mcp` (`authorization/`, `bridge/`, `tools/`, `apps/`, `admin/`). MCP is sign-in only: the no-account server at `/mcp/anon` was removed in v2.11 and now answers 404.
 
-- **MCP Registry** (`server.json` at the repo root, name `cc.hrva/url-shortener`, remote `https://hrva.cc/mcp`): keep `version` at the release (`2.39.0` for v2.39). Only `/mcp` is listed; `/mcp/admin` is not submitted to any directory. To republish, from the repo root: `mcp-publisher login dns --domain hrva.cc --private-key <key>`, then `mcp-publisher publish`. The key lives outside the repo; never commit it.
+- **MCP Registry** (`server.json` at the repo root, name `cc.hrva/url-shortener`, remote `https://hrva.cc/mcp`): keep `version` at the release (`2.39.0` for v2.39). Only `/mcp` is listed; `/mcp/admin` is not submitted to any directory. Every release bumps `version` in the same push, and ends with a publish: the owner runs `~/.config/mcp-registry/publish.sh`, which logs in with the hrva.cc DNS key kept next to it and runs `mcp-publisher publish` from this repo. The key lives outside the repo; never commit it.
 
 ### Endpoints
 | Method | Path | Auth | Notes |
