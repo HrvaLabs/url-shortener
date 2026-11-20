@@ -14,6 +14,7 @@ import cc.hrva.urlshortener.service.RedirectChainService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.SafeBrowsingService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterCheckService;
 import cc.hrva.urlshortener.util.BlockDetails;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.RedirectChains;
@@ -56,6 +57,7 @@ public class DefaultRedirectChainService implements RedirectChainService {
     private final ModerationService moderationService;
     private final ReviewQueueService reviewQueueService;
     private final SuspiciousUrlService suspiciousUrlService;
+    private final DnsFilterCheckService dnsFilterCheckService;
     private final Clock clock;
 
     @Override
@@ -96,9 +98,27 @@ public class DefaultRedirectChainService implements RedirectChainService {
             log.info("Safe Browsing was unavailable, the redirects are checked again in the next nightly scan urlId={}", urlId);
             return Result.SAFE_BROWSING_UNAVAILABLE;
         }
-        urlRepository.recordRedirectChain(urlId, longUrl, StringUtils.truncate(chain.get().getLast().original(), FINAL_URL_LENGTH),
-                RedirectChains.join(chain.get()), now(), viaShortener);
+        final var finalUrl = StringUtils.truncate(chain.get().getLast().original(), FINAL_URL_LENGTH);
+        urlRepository.recordRedirectChain(urlId, longUrl, finalUrl, RedirectChains.join(chain.get()), now(), viaShortener);
+        if (isNewFinalHost(url.get(), finalUrl)) {
+            checkDnsFiltersLater(urlId);
+        }
         return Result.CHECKED;
+    }
+
+    private static boolean isNewFinalHost(final Url url, final String finalUrl) {
+        final var finalHost = DomainNames.hostOf(finalUrl);
+        return finalHost.isPresent()
+                && !finalHost.equals(DomainNames.hostOf(url.getLongUrl()))
+                && !finalHost.equals(DomainNames.hostOf(url.getFinalUrl()));
+    }
+
+    private void checkDnsFiltersLater(final long urlId) {
+        try {
+            dnsFilterCheckService.checkLater(urlId);
+        } catch (final RuntimeException exception) {
+            log.warn("Could not schedule the DNS filter check of a redirect's final host urlId={} exception={}", urlId, exception.getClass().getName());
+        }
     }
 
     private static boolean isHeldForACampaign(final Url url) {

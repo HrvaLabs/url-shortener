@@ -11,6 +11,7 @@ import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.service.RedirectChainService.Result;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterCheckService;
 import cc.hrva.urlshortener.service.impl.DefaultRedirectChainService;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -36,6 +37,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,6 +49,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -86,6 +89,9 @@ class DefaultRedirectChainServiceTest {
     @Mock
     private SuspiciousUrlService suspiciousUrlService;
 
+    @Mock
+    private DnsFilterCheckService dnsFilterCheckService;
+
     private RedirectChainService redirectChainService;
 
     private final Url link = Url.builder().id(LINK_ID).shortUrl("abc").longUrl(DESTINATION).active(true).build();
@@ -93,7 +99,7 @@ class DefaultRedirectChainServiceTest {
     @BeforeEach
     void setUp() {
         redirectChainService = new DefaultRedirectChainService(urlRepository, redirectFollower, linkCheckService, safeBrowsingService,
-                moderationService, reviewQueueService, suspiciousUrlService, Clock.fixed(NOW, ZoneOffset.UTC));
+                moderationService, reviewQueueService, suspiciousUrlService, dnsFilterCheckService, Clock.fixed(NOW, ZoneOffset.UTC));
         lenient().when(urlRepository.findById(LINK_ID)).thenReturn(Optional.of(link));
         lenient().when(urlRepository.findLongUrlById(LINK_ID)).thenReturn(Optional.of(DESTINATION));
         lenient().when(linkCheckService.check(anyString())).thenReturn(LinkVerdict.clean());
@@ -227,6 +233,49 @@ class DefaultRedirectChainServiceTest {
         verify(safeBrowsingService).checkUrlsForThreats(List.of(TRACKER));
         verify(linkCheckService).check(TRACKER);
         verify(linkCheckService, never()).check(DESTINATION);
+    }
+
+    @Test
+    void aNewFinalHostIsCheckedAgainstTheDnsFiltersOnceItIsRecorded() {
+        chain(DESTINATION, TRACKER, "https://shop.example/offer");
+
+        redirectChainService.check(LINK_ID);
+
+        final var order = inOrder(urlRepository, dnsFilterCheckService);
+        order.verify(urlRepository).recordRedirectChain(LINK_ID, DESTINATION, "https://shop.example/offer", joined(DESTINATION, TRACKER, "https://shop.example/offer"),
+                CHECKED_AT, false);
+        order.verify(dnsFilterCheckService).checkLater(LINK_ID);
+    }
+
+    @Test
+    void aChainEndingOnTheDestinationHostIsNotCheckedAgainstTheDnsFiltersAgain() {
+        chain(DESTINATION, "https://INNOCENT.example/landing");
+
+        redirectChainService.check(LINK_ID);
+
+        verifyNoInteractions(dnsFilterCheckService);
+    }
+
+    @Test
+    void aFinalHostAlreadyRecordedIsNotCheckedAgainstTheDnsFiltersAgain() {
+        link.setFinalUrl("https://shop.example/yesterday");
+        chain(DESTINATION, "https://shop.example/offer");
+
+        redirectChainService.check(LINK_ID);
+
+        verifyNoInteractions(dnsFilterCheckService);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void aRejectedDnsFilterCheckNeverFailsTheRedirectCheck(final CapturedOutput output) {
+        chain(DESTINATION, "https://shop.example/offer");
+        org.mockito.Mockito.doThrow(new TaskRejectedException("Executor did not accept the task")).when(dnsFilterCheckService).checkLater(LINK_ID);
+
+        final var result = redirectChainService.check(LINK_ID);
+
+        assertThat(result).isEqualTo(Result.CHECKED);
+        assertThat(output.getOut()).contains("Could not schedule the DNS filter check of a redirect's final host urlId=7");
     }
 
     @Test
@@ -596,7 +645,7 @@ class DefaultRedirectChainServiceTest {
         final var loopbackOnly = "http://127.0.0.1:" + server.getAddress().getPort() + "/";
         final RedirectFollower follower = new PublicHttpFetcher(url -> url.startsWith(loopbackOnly), InetAddress::isLoopbackAddress)::followRedirects;
         return new DefaultRedirectChainService(urlRepository, follower, linkCheckService, safeBrowsingService, moderationService,
-                reviewQueueService, suspiciousUrlService, Clock.fixed(NOW, ZoneOffset.UTC));
+                reviewQueueService, suspiciousUrlService, dnsFilterCheckService, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     private static String hostOfLength(final int length) {
