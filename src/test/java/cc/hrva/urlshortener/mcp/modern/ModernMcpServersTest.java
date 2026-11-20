@@ -18,6 +18,8 @@ import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.AnalyticsService;
 import cc.hrva.urlshortener.service.BlocklistSourceService;
 import cc.hrva.urlshortener.service.LinkCheckService;
+import cc.hrva.urlshortener.service.SettingsService;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterService;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
@@ -180,6 +182,12 @@ class ModernMcpServersTest {
 
     @MockitoBean
     private LinkCheckService linkCheckService;
+
+    @MockitoBean
+    private DnsFilterService dnsFilterService;
+
+    @MockitoBean
+    private SettingsService settingsService;
 
     @MockitoBean
     private BlocklistSourceService blocklistSourceService;

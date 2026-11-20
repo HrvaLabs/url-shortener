@@ -11,6 +11,8 @@ import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.SettingsService;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterService;
 import cc.hrva.urlshortener.service.domain.ShortLinks;
 import io.modelcontextprotocol.json.jackson3.JacksonMcpJsonMapper;
 import io.modelcontextprotocol.server.McpServer;
@@ -47,6 +49,8 @@ public class AdminMcpServerConfiguration {
     private final AppProperties appProperties;
     private final Clock clock;
     private final ShortLinks shortLinks;
+    private final DnsFilterService dnsFilterService;
+    private final SettingsService settingsService;
 
     @Bean
     public AdminMcpTools adminMcpTools() {
@@ -75,7 +79,8 @@ public class AdminMcpServerConfiguration {
 
     private ModerationTools moderationTools() {
         return new ModerationTools(mcpUserResolver, moderationService, reviewQueueService, scammerSignalService, linkCheckService,
-                blocklistSourceService, userRepository, urlRepository, linkReviewRepository, appProperties, clock, shortLinks);
+                blocklistSourceService, userRepository, urlRepository, linkReviewRepository, appProperties, clock, shortLinks,
+                dnsFilterService, settingsService);
     }
 
     private McpSchema.ServerCapabilities capabilities() {

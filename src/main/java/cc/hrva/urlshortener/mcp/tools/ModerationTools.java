@@ -18,6 +18,11 @@ import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.SettingsService;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterAnswer;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterReport;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterService;
+import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.EmailAddresses;
@@ -34,6 +39,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -70,6 +76,8 @@ public class ModerationTools {
     private static final String SHARED_HOSTING = "That's a shared hosting domain. Use the dashboard to block it.";
     private static final String UNFLAGGED_LINKS = "This would also block %s nobody flagged. Use the dashboard to block this domain.";
     private static final String NOT_BLOCKED_OR_FLAGGED = "Only blocked or flagged links can be deleted here. Use the dashboard.";
+    private static final String DNS_FILTERS_OFF = "DNS filters: off";
+    private static final String DNS_HOST_DOES_NOT_RESOLVE = "DNS filters: the host doesn't resolve";
     private static final String NO_FLAGGED_LINKS = "This account has no blocked or flagged links. Use the dashboard to block it.";
 
     private final McpUserResolver mcpUserResolver;
@@ -84,6 +92,8 @@ public class ModerationTools {
     private final AppProperties appProperties;
     private final Clock clock;
     private final ShortLinks shortLinks;
+    private final DnsFilterService dnsFilterService;
+    private final SettingsService settingsService;
 
     @McpTool(
             name = MODERATION_SUMMARY,
@@ -392,7 +402,18 @@ public class ModerationTools {
             lines.add("Nothing matched.");
         }
         verdict.reasons().forEach(reason -> lines.add("- " + reason));
+        dnsFiltersLine(trimmed).ifPresent(lines::add);
         return String.join("\n", lines);
+    }
+
+    private Optional<String> dnsFiltersLine(final String url) {
+        if (!settingsService.isOn(SettingKey.DNS_FILTER_CHECK)) {
+            return Optional.of(DNS_FILTERS_OFF);
+        }
+        return DomainNames.hostOf(url)
+                .filter(host -> !DomainNames.isIpLiteral(host))
+                .map(dnsFilterService::lookup)
+                .map(ModerationTools::describeDnsFilters);
     }
 
     private String block(final Long urlId, final String reason) {
@@ -522,6 +543,22 @@ public class ModerationTools {
         final var host = DomainNames.hostOf(authority).orElse("unknown host");
         final var path = pathStart < 0 ? "" : StringUtils.abbreviate(plainText(beforeQuery.substring(pathStart)), MAX_PATH_LENGTH);
         return "<" + host + path + ">";
+    }
+
+    private static String describeDnsFilters(final DnsFilterReport report) {
+        if (!report.exists()) {
+            return DNS_HOST_DOES_NOT_RESOLVE;
+        }
+        return "DNS filters: " + report.answers().stream().map(ModerationTools::describeDnsFilter).collect(Collectors.joining(", "));
+    }
+
+    private static String describeDnsFilter(final DnsFilterAnswer answer) {
+        final var label = answer.provider().label();
+        return switch (answer.status()) {
+            case BLOCKED -> "%s blocked (%s)".formatted(label, answer.answer());
+            case NOT_BLOCKED -> label + " not blocked";
+            case NO_ANSWER -> label + " no answer";
+        };
     }
 
     private static String plainText(final String path) {

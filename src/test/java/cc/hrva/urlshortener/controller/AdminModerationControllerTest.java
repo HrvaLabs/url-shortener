@@ -9,6 +9,13 @@ import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.SettingsService;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterAnswer;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterProvider;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterReport;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterService;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterStatus;
+import cc.hrva.urlshortener.service.settings.SettingKey;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
@@ -52,9 +59,16 @@ class AdminModerationControllerTest {
     @Mock
     private LinkCheckService linkCheckService;
 
+    @Mock
+    private DnsFilterService dnsFilterService;
+
+    @Mock
+    private SettingsService settingsService;
+
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(new AdminModerationController(moderationService, scammerSignalService, linkCheckService))
+        mockMvc = MockMvcBuilders.standaloneSetup(new AdminModerationController(moderationService, scammerSignalService, linkCheckService,
+                        dnsFilterService, settingsService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -151,6 +165,58 @@ class AdminModerationControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.host").value(nullValue()))
                 .andExpect(jsonPath("$.registrableDomain").value(nullValue()));
+    }
+
+    @Test
+    void checkingAUrlListsWhatEachDnsFilterAnswered() throws Exception {
+        when(linkCheckService.explain("https://malware.wicar.org/data/eicar.com")).thenReturn(LinkVerdict.clean());
+        when(settingsService.isOn(SettingKey.DNS_FILTER_CHECK)).thenReturn(true);
+        when(dnsFilterService.lookup("malware.wicar.org")).thenReturn(new DnsFilterReport("malware.wicar.org", true, List.of(
+                new DnsFilterAnswer(DnsFilterProvider.QUAD9, DnsFilterStatus.BLOCKED, "NXDOMAIN"),
+                new DnsFilterAnswer(DnsFilterProvider.CLOUDFLARE, DnsFilterStatus.BLOCKED, "0.0.0.0"),
+                new DnsFilterAnswer(DnsFilterProvider.CLEANBROWSING, DnsFilterStatus.NOT_BLOCKED, "208.94.116.246"),
+                new DnsFilterAnswer(DnsFilterProvider.CONTROL_D, DnsFilterStatus.NO_ANSWER, null))));
+
+        mockMvc.perform(post("/api/v1/admin/url-check").principal(SIGNED_IN_ADMIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"url\":\"https://malware.wicar.org/data/eicar.com\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.dnsFilterHostExists").value(true))
+                .andExpect(jsonPath("$.dnsFilters.length()").value(4))
+                .andExpect(jsonPath("$.dnsFilters[0].filter").value("Quad9"))
+                .andExpect(jsonPath("$.dnsFilters[0].status").value("BLOCKED"))
+                .andExpect(jsonPath("$.dnsFilters[0].answer").value("NXDOMAIN"))
+                .andExpect(jsonPath("$.dnsFilters[3].filter").value("Control D"))
+                .andExpect(jsonPath("$.dnsFilters[3].status").value("NO_ANSWER"));
+    }
+
+    @Test
+    void checkingAUrlWithTheDnsFilterCheckOffAsksNoFilter() throws Exception {
+        when(linkCheckService.explain("https://gableci.hrva.cc/menu")).thenReturn(LinkVerdict.clean());
+        when(settingsService.isOn(SettingKey.DNS_FILTER_CHECK)).thenReturn(false);
+
+        mockMvc.perform(post("/api/v1/admin/url-check").principal(SIGNED_IN_ADMIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"url\":\"https://gableci.hrva.cc/menu\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.dnsFilters").isEmpty())
+                .andExpect(jsonPath("$.dnsFilterHostExists").value(false));
+
+        verifyNoInteractions(dnsFilterService);
+    }
+
+    @Test
+    void checkingAnIpAddressAsksNoFilter() throws Exception {
+        when(linkCheckService.explain("http://203.0.113.5/login")).thenReturn(LinkVerdict.clean());
+        when(settingsService.isOn(SettingKey.DNS_FILTER_CHECK)).thenReturn(true);
+
+        mockMvc.perform(post("/api/v1/admin/url-check").principal(SIGNED_IN_ADMIN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"url\":\"http://203.0.113.5/login\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.dnsFilters").isEmpty());
+
+        verifyNoInteractions(dnsFilterService);
     }
 
     @Test

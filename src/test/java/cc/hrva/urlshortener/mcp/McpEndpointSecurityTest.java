@@ -34,6 +34,7 @@ import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.AnalyticsService;
 import cc.hrva.urlshortener.service.BlocklistSourceService;
 import cc.hrva.urlshortener.service.LinkCheckService;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterService;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
@@ -254,6 +255,9 @@ class McpEndpointSecurityTest {
 
     @MockitoBean
     private LinkCheckService linkCheckService;
+
+    @MockitoBean
+    private DnsFilterService dnsFilterService;
 
     @MockitoBean
     private BlocklistSourceService blocklistSourceService;

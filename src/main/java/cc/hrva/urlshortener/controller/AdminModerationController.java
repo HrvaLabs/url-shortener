@@ -8,6 +8,11 @@ import cc.hrva.urlshortener.exception.ApiException;
 import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.SettingsService;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterReport;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterService;
+import cc.hrva.urlshortener.service.settings.SettingKey;
+import cc.hrva.urlshortener.util.DomainNames;
 import io.swagger.v3.oas.annotations.Hidden;
 import java.util.List;
 import java.util.Optional;
@@ -36,6 +41,8 @@ public class AdminModerationController {
     private final ModerationService moderationService;
     private final ScammerSignalService scammerSignalService;
     private final LinkCheckService linkCheckService;
+    private final DnsFilterService dnsFilterService;
+    private final SettingsService settingsService;
 
     @PostMapping("/users/{id}/block")
     @PreAuthorize("hasRole('ROLE_ADMIN')")
@@ -66,7 +73,17 @@ public class AdminModerationController {
     public ResponseEntity<UrlCheckResponse> checkUrl(@RequestBody final UrlCheckDto urlCheckDto) {
         final var url = Optional.ofNullable(StringUtils.stripToNull(urlCheckDto.url())).orElseThrow(() -> new ApiException(URL_MISSING));
 
-        return ResponseEntity.ok(UrlCheckResponse.from(linkCheckService.explain(url), url));
+        return ResponseEntity.ok(UrlCheckResponse.from(linkCheckService.explain(url), url, dnsReportOf(url)));
+    }
+
+    private DnsFilterReport dnsReportOf(final String url) {
+        if (!settingsService.isOn(SettingKey.DNS_FILTER_CHECK)) {
+            return null;
+        }
+        return DomainNames.hostOf(url)
+                .filter(host -> !DomainNames.isIpLiteral(host))
+                .map(dnsFilterService::lookup)
+                .orElse(null);
     }
 
 }

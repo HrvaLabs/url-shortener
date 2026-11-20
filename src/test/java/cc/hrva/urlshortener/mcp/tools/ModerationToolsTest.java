@@ -23,6 +23,13 @@ import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.SettingsService;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterAnswer;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterProvider;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterReport;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterService;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterStatus;
+import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.service.domain.ShortLinks;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
@@ -113,6 +120,12 @@ class ModerationToolsTest {
     @Mock
     private LinkReviewRepository linkReviewRepository;
 
+    @Mock
+    private DnsFilterService dnsFilterService;
+
+    @Mock
+    private SettingsService settingsService;
+
     private ModerationTools moderationTools;
 
     @BeforeEach
@@ -121,7 +134,8 @@ class ModerationToolsTest {
         appProperties.getMcp().setIssuer("https://hrva.cc");
         moderationTools = new ModerationTools(mcpUserResolver, moderationService, reviewQueueService, scammerSignalService,
                 linkCheckService, blocklistSourceService, userRepository, urlRepository, linkReviewRepository, appProperties,
-                Clock.fixed(NOW, ZoneOffset.UTC), new ShortLinks(appProperties));
+                Clock.fixed(NOW, ZoneOffset.UTC), new ShortLinks(appProperties),
+                dnsFilterService, settingsService);
     }
 
     @Test
@@ -765,7 +779,8 @@ class ModerationToolsTest {
                 "Verdict: BLOCK (DOMAIN_RULE: evil.example)",
                 "- blocked by rule evil.example",
                 "- on list HaGeZi Pro",
-                "- imitates njuskalo");
+                "- imitates njuskalo",
+                "DNS filters: off");
         verify(linkCheckService).explain("https://evil.example/login?token=abc");
         verify(linkCheckService, never()).check(any());
     }
@@ -777,7 +792,39 @@ class ModerationToolsTest {
 
         final var result = moderationTools.checkUrl("https://example.com");
 
-        assertThat(text(result).lines()).containsExactly("<example.com>", "Verdict: CLEAN", "Nothing matched.");
+        assertThat(text(result).lines()).containsExactly("<example.com>", "Verdict: CLEAN", "Nothing matched.", "DNS filters: off");
+    }
+
+    @Test
+    void checkUrlListsEachDnsFilter() {
+        signedInAs(ADMIN, true);
+        when(settingsService.isOn(SettingKey.DNS_FILTER_CHECK)).thenReturn(true);
+        when(linkCheckService.explain(anyString())).thenReturn(LinkVerdict.clean());
+        when(dnsFilterService.lookup("malware.wicar.org")).thenReturn(new DnsFilterReport("malware.wicar.org", true, List.of(
+                new DnsFilterAnswer(DnsFilterProvider.QUAD9, DnsFilterStatus.BLOCKED, "NXDOMAIN"),
+                new DnsFilterAnswer(DnsFilterProvider.CLOUDFLARE, DnsFilterStatus.BLOCKED, "0.0.0.0"),
+                new DnsFilterAnswer(DnsFilterProvider.CLEANBROWSING, DnsFilterStatus.NOT_BLOCKED, "208.94.116.246"),
+                new DnsFilterAnswer(DnsFilterProvider.CONTROL_D, DnsFilterStatus.NO_ANSWER, null))));
+        when(dnsFilterService.lookup("gone.example")).thenReturn(new DnsFilterReport("gone.example", false, List.of()));
+
+        final var blocked = text(moderationTools.checkUrl("https://malware.wicar.org/data"));
+        final var unresolved = text(moderationTools.checkUrl("https://gone.example/"));
+
+        assertThat(blocked.lines()).contains(
+                "DNS filters: Quad9 blocked (NXDOMAIN), Cloudflare blocked (0.0.0.0), CleanBrowsing not blocked, Control D no answer");
+        assertThat(unresolved.lines()).contains("DNS filters: the host doesn't resolve");
+    }
+
+    @Test
+    void checkUrlAsksNoDnsFilterForAnIpAddress() {
+        signedInAs(ADMIN, true);
+        when(settingsService.isOn(SettingKey.DNS_FILTER_CHECK)).thenReturn(true);
+        when(linkCheckService.explain("http://203.0.113.5/")).thenReturn(LinkVerdict.clean());
+
+        final var result = moderationTools.checkUrl("http://203.0.113.5/");
+
+        assertThat(text(result)).doesNotContain("DNS filters");
+        verifyNoInteractions(dnsFilterService);
     }
 
     @Test

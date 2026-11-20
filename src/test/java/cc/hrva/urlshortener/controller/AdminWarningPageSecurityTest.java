@@ -22,8 +22,10 @@ import cc.hrva.urlshortener.security.OAuth2LoginUserService;
 import cc.hrva.urlshortener.security.SessionToken;
 import cc.hrva.urlshortener.security.TokenProvider;
 import cc.hrva.urlshortener.service.LinkCheckService;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterService;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.ScammerSignalService;
+import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.ratelimit.RateLimiter;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.RSAKey;
@@ -85,6 +87,12 @@ class AdminWarningPageSecurityTest {
 
     @MockitoBean
     private LinkCheckService linkCheckService;
+
+    @MockitoBean
+    private DnsFilterService dnsFilterService;
+
+    @MockitoBean
+    private SettingsService settingsService;
 
     @MockitoBean
     private UrlRepository urlRepository;

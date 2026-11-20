@@ -16,7 +16,8 @@ class DnsFilterLookupCallersTest {
 
     private static final Path MAIN_SOURCES = Path.of("src", "main", "java");
     private static final String LOOKUP_PACKAGE = "/service/dnsfilter/";
-    private static final List<String> ALLOWED_OUTSIDE_THE_PACKAGE = List.of("AdminModerationController.java", "ModerationTools.java", "OwnHostsCheck.java");
+    private static final List<String> ALLOWED_OUTSIDE_THE_PACKAGE = List.of("AdminModerationController.java", "ModerationTools.java", "AdminMcpServerConfiguration.java",
+            "OwnHostsCheck.java");
     private static final List<String> NEVER = List.of("DefaultClickCheckService.java", "DefaultUrlService.java");
     private static final Pattern SERVICE_REFERENCE = Pattern.compile("\\bDnsFilterService\\b");
 
