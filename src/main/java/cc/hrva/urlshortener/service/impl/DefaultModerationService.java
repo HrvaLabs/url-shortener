@@ -131,7 +131,7 @@ public class DefaultModerationService implements ModerationService {
             .byDefault(Sort.by(Sort.Order.desc(CREATED_AT)))
             .thenBy(Sort.Order.desc(CREATED_AT), Sort.Order.desc(ID));
     private static final Set<BlockReason> RESTORED_BY_ALLOW = EnumSet.of(BlockReason.BLOCKLIST, BlockReason.SCAM_SIGNALS, BlockReason.DOMAIN_RULE,
-            BlockReason.CAMPAIGN, BlockReason.SIGN_IN_FORM);
+            BlockReason.DNS_FILTERS, BlockReason.CAMPAIGN, BlockReason.SIGN_IN_FORM);
     private static final Set<BlockReason> HELD = EnumSet.of(BlockReason.CAMPAIGN, BlockReason.SIGN_IN_FORM);
     private static final Set<BlockReason> CAMPAIGN_HOLDS = EnumSet.of(BlockReason.CAMPAIGN);
     private static final int IDS_PER_QUERY = 1_000;

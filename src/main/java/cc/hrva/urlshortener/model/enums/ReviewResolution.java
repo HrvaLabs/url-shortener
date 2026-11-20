@@ -16,7 +16,7 @@ public enum ReviewResolution {
             case CAMPAIGN, SIGN_IN_FORM -> Optional.empty();
             case DOMAIN_RULE -> Optional.of(DOMAIN_BLOCKED);
             case USER_BLOCKED -> Optional.of(USER_BLOCKED);
-            case SAFE_BROWSING, BLOCKLIST, ADMIN, SCAM_SIGNALS -> Optional.of(LINK_BLOCKED);
+            case SAFE_BROWSING, BLOCKLIST, ADMIN, SCAM_SIGNALS, DNS_FILTERS -> Optional.of(LINK_BLOCKED);
         };
     }
 

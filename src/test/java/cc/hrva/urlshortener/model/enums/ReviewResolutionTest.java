@@ -22,6 +22,7 @@ class ReviewResolutionTest {
                 BlockReason.ADMIN, Optional.of(ReviewResolution.LINK_BLOCKED),
                 BlockReason.USER_BLOCKED, Optional.of(ReviewResolution.USER_BLOCKED),
                 BlockReason.SCAM_SIGNALS, Optional.of(ReviewResolution.LINK_BLOCKED),
+                BlockReason.DNS_FILTERS, Optional.of(ReviewResolution.LINK_BLOCKED),
                 BlockReason.CAMPAIGN, Optional.empty(),
                 BlockReason.SIGN_IN_FORM, Optional.empty()));
     }

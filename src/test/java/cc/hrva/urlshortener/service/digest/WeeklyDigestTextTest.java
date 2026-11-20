@@ -196,6 +196,7 @@ class WeeklyDigestTextTest {
                         new CountEntry("BLOCKLIST", 3),
                         new CountEntry("DOMAIN_RULE", 2),
                         new CountEntry("SCAM_SIGNALS", 1),
+                        new CountEntry("DNS_FILTERS", 2),
                         new CountEntry("CAMPAIGN", 1),
                         new CountEntry("SIGN_IN_FORM", 1),
                         new CountEntry("ADMIN", 2),
@@ -205,7 +206,7 @@ class WeeklyDigestTextTest {
         assertThat(WeeklyDigestText.lines(digest, SHORT_LINKS, REVIEW_PAGE, UnaryOperator.identity())).contains(
                 "How they were made: 1,500 website, 12 API key, 6 bulk, 4 AI connector, 3 website without an account, "
                         + "2 AI connector without an account, 1 unknown",
-                "Automatic blocks: 4 Safe Browsing, 3 blocklist, 2 domain rule, 1 scam signals, 1 campaign hold, 1 sign-in form hold, 2 by an admin, 1 account blocked");
+                "Automatic blocks: 4 Safe Browsing, 3 blocklist, 2 domain rule, 1 scam signals, 2 DNS filters, 1 campaign hold, 1 sign-in form hold, 2 by an admin, 1 account blocked");
     }
 
     @Test

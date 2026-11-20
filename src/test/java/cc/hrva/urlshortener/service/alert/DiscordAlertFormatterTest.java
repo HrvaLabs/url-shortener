@@ -320,6 +320,15 @@ class DiscordAlertFormatterTest {
     }
 
     @Test
+    void dnsFilterBlockNamesTheFilters() {
+        final var content = formatter.message(List.of(
+                new LinkBlocked(new AlertedLink(7L, "abc12", "poshmark.id653655.shop", null, null), BlockReason.DNS_FILTERS, "Quad9, Cloudflare")), 0).content();
+
+        assertThat(content.lines().toList()).containsExactly(
+                "Blocked: hrva.cc/abc12 → poshmark.id653655.shop (DNS filters: Quad9, Cloudflare), no account, <https://app.hrva.cc/admin/urls>");
+    }
+
+    @Test
     void eachKindOfAlertHasItsOwnPlainLine() {
         final var content = formatter.message(List.of(
                 new LinkBlocked(new AlertedLink(30L, "s30", "login-paypa1.top", null, null), BlockReason.BLOCKLIST, "HaGeZi TIF medium"),

@@ -137,6 +137,7 @@ public class DefaultLinkDigestService implements LinkDigestService {
             case BLOCKLIST -> "a blocklist";
             case DOMAIN_RULE -> "a domain rule";
             case SCAM_SIGNALS -> "scam signals";
+            case DNS_FILTERS -> "DNS filters";
             case ADMIN -> "an admin";
             case USER_BLOCKED -> "a blocked account";
             case CAMPAIGN -> "a campaign hold";

@@ -311,6 +311,7 @@ public class DiscordAlertFormatter {
             case BLOCKLIST -> "on";
             case DOMAIN_RULE -> "domain rule:";
             case SCAM_SIGNALS -> "scam signals:";
+            case DNS_FILTERS -> "DNS filters:";
             case ADMIN -> "by an admin:";
             case USER_BLOCKED -> "account blocked";
             case CAMPAIGN -> "campaign hold";

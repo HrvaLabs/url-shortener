@@ -2641,6 +2641,16 @@ class DefaultModerationServiceTest {
     }
 
     @Test
+    void anAllowRuleRestoresADnsFilterBlockLikeAListedOne() {
+        final var restored = blocked(20L, "https://jofogas.cards/a", BlockReason.DNS_FILTERS, null);
+        when(linkCheckService.check("https://jofogas.cards/a")).thenReturn(ALLOWED);
+
+        assertThat(moderationService.allowDomain("jofogas.cards", null, ADMIN, "admin")).isEqualTo(1);
+
+        assertThat(restored).extracting(Url::isActive, Url::getBlockReason, Url::getBlockDetail).containsExactly(true, null, null);
+    }
+
+    @Test
     void restoringCampaignHoldsReactivatesTheLinksStillHeldUnlessTheCheckBlocksThem() {
         final var restored = held(30L, "https://a.com/wqamhcsom?r=1&t=2");
         final var stillBlocked = held(31L, "https://b.com/wqamhcsom?r=1&t=2");

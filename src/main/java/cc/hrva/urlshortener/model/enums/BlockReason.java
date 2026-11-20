@@ -10,6 +10,7 @@ public enum BlockReason {
     ADMIN,
     USER_BLOCKED,
     SCAM_SIGNALS,
+    DNS_FILTERS,
     CAMPAIGN,
     SIGN_IN_FORM;
 
