@@ -22,6 +22,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
@@ -51,6 +52,8 @@ public class DefaultDnsFilterCheckService implements DnsFilterCheckService {
     private final ModerationService moderationService;
     private final ReviewQueueService reviewQueueService;
     private final Clock clock;
+    private final AtomicBoolean recheckRunning = new AtomicBoolean();
+    private final AtomicBoolean sweepRunning = new AtomicBoolean();
 
     @Override
     public DnsFilterCheckResult check(final long urlId) {
@@ -98,22 +101,38 @@ public class DefaultDnsFilterCheckService implements DnsFilterCheckService {
         }
     }
 
-    @Async(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR)
+    @Async(AsyncExecutorConfiguration.DNS_FILTER_SWEEP_EXECUTOR)
     @Override
     public void recheckFresh() {
-        final var now = LocalDateTime.now(clock);
-        final var ids = new LinkedHashSet<Long>();
-        RECHECK_AGES.forEach(age -> ids.addAll(urlRepository.findActiveIdsCreatedBetween(now.minus(age).minus(RECHECK_WINDOW), now.minus(age))));
-        final var results = checkAll(ids);
-        log.info("DNS filter recheck of new links finished links={} results={}", ids.size(), results);
+        if (!recheckRunning.compareAndSet(false, true)) {
+            log.info("DNS filter recheck still running, this run skipped");
+            return;
+        }
+        try {
+            final var now = LocalDateTime.now(clock);
+            final var ids = new LinkedHashSet<Long>();
+            RECHECK_AGES.forEach(age -> ids.addAll(urlRepository.findActiveIdsCreatedBetween(now.minus(age).minus(RECHECK_WINDOW), now.minus(age))));
+            final var results = checkAll(ids);
+            log.info("DNS filter recheck of new links finished links={} results={}", ids.size(), results);
+        } finally {
+            recheckRunning.set(false);
+        }
     }
 
-    @Async(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR)
+    @Async(AsyncExecutorConfiguration.DNS_FILTER_SWEEP_EXECUTOR)
     @Override
     public void sweep() {
-        final var ids = urlRepository.findActiveIds();
-        final var results = checkAll(ids);
-        log.info("DNS filter sweep finished links={} results={}", ids.size(), results);
+        if (!sweepRunning.compareAndSet(false, true)) {
+            log.info("DNS filter sweep still running, this run skipped");
+            return;
+        }
+        try {
+            final var ids = urlRepository.findActiveIds();
+            final var results = checkAll(ids);
+            log.info("DNS filter sweep finished links={} results={}", ids.size(), results);
+        } finally {
+            sweepRunning.set(false);
+        }
     }
 
     private Map<DnsFilterCheckResult, Integer> checkAll(final Collection<Long> ids) {

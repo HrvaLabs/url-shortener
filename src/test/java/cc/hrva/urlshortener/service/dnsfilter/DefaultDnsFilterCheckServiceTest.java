@@ -13,6 +13,9 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -290,9 +293,54 @@ class DefaultDnsFilterCheckServiceTest {
     }
 
     @Test
+    void aSweepThatIsStillRunningSkipsTheNextOne(final CapturedOutput output) throws Exception {
+        when(urlRepository.findActiveIds()).thenReturn(List.of(LINK_ID));
+        final var inside = new CountDownLatch(1);
+        final var release = new CountDownLatch(1);
+        when(dnsFilterService.lookup(HOST)).thenAnswer(invocation -> {
+            inside.countDown();
+            release.await(5, TimeUnit.SECONDS);
+            return report(HOST, answer(QUAD9, NOT_BLOCKED));
+        });
+        final var first = CompletableFuture.runAsync(service::sweep);
+        assertThat(inside.await(5, TimeUnit.SECONDS)).isTrue();
+
+        service.sweep();
+        release.countDown();
+        first.get(5, TimeUnit.SECONDS);
+
+        assertThat(output.getOut()).contains("DNS filter sweep still running, this run skipped");
+        verify(urlRepository, times(1)).findActiveIds();
+        verify(dnsFilterService, times(1)).lookup(HOST);
+        service.sweep();
+        verify(urlRepository, times(2)).findActiveIds();
+    }
+
+    @Test
+    void aRecheckThatIsStillRunningSkipsTheNextOne(final CapturedOutput output) throws Exception {
+        when(urlRepository.findActiveIdsCreatedBetween(LocalDateTime.of(2026, 11, 19, 10, 45), LocalDateTime.of(2026, 11, 19, 11, 0))).thenReturn(List.of(LINK_ID));
+        final var inside = new CountDownLatch(1);
+        final var release = new CountDownLatch(1);
+        when(dnsFilterService.lookup(HOST)).thenAnswer(invocation -> {
+            inside.countDown();
+            release.await(5, TimeUnit.SECONDS);
+            return report(HOST, answer(QUAD9, NOT_BLOCKED));
+        });
+        final var first = CompletableFuture.runAsync(service::recheckFresh);
+        assertThat(inside.await(5, TimeUnit.SECONDS)).isTrue();
+
+        service.recheckFresh();
+        release.countDown();
+        first.get(5, TimeUnit.SECONDS);
+
+        assertThat(output.getOut()).contains("DNS filter recheck still running, this run skipped");
+        verify(dnsFilterService, times(1)).lookup(HOST);
+    }
+
+    @Test
     void theRechecksAndTheSweepRunInTheBackground() throws NoSuchMethodException {
-        assertThat(DefaultDnsFilterCheckService.class.getMethod("recheckFresh").getAnnotation(Async.class)).isNotNull();
-        assertThat(DefaultDnsFilterCheckService.class.getMethod("sweep").getAnnotation(Async.class)).isNotNull();
+        assertThat(DefaultDnsFilterCheckService.class.getMethod("recheckFresh").getAnnotation(Async.class).value()).isEqualTo("dnsFilterSweepExecutor");
+        assertThat(DefaultDnsFilterCheckService.class.getMethod("sweep").getAnnotation(Async.class).value()).isEqualTo("dnsFilterSweepExecutor");
     }
 
     private static DnsFilterReport report(final String host, final DnsFilterAnswer... answers) {

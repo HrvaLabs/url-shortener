@@ -15,6 +15,7 @@ public class AsyncExecutorConfiguration {
     public static final String NOTIFICATION_TASK_EXECUTOR = "notificationTaskExecutor";
     public static final String SIGN_IN_CHECK_EXECUTOR = "signInCheckExecutor";
     public static final String DNS_FILTER_EXECUTOR = "dnsFilterExecutor";
+    public static final String DNS_FILTER_SWEEP_EXECUTOR = "dnsFilterSweepExecutor";
     private static final int REDIRECT_CHECK_THREADS = 2;
     private static final int REDIRECT_CHECK_QUEUE_CAPACITY = 200;
     private static final String REDIRECT_CHECK_THREAD_PREFIX = "redirect-check-";
@@ -23,6 +24,9 @@ public class AsyncExecutorConfiguration {
     private static final int DNS_FILTER_QUEUE_CAPACITY = 200;
     private static final String DNS_FILTER_THREAD_PREFIX = "dns-filter-";
     private static final Duration DNS_FILTER_SHUTDOWN_GRACE = Duration.ofSeconds(15);
+    private static final int DNS_FILTER_SWEEP_THREADS = 1;
+    private static final int DNS_FILTER_SWEEP_QUEUE_CAPACITY = 2;
+    private static final String DNS_FILTER_SWEEP_THREAD_PREFIX = "dns-filter-sweep-";
     private static final int NOTIFICATION_TASK_THREADS = 4;
     private static final int NOTIFICATION_TASK_QUEUE_CAPACITY = 16;
     private static final String NOTIFICATION_TASK_THREAD_PREFIX = "notification-task-";
@@ -55,6 +59,18 @@ public class AsyncExecutorConfiguration {
                 .maxPoolSize(DNS_FILTER_THREADS)
                 .queueCapacity(DNS_FILTER_QUEUE_CAPACITY)
                 .threadNamePrefix(DNS_FILTER_THREAD_PREFIX)
+                .awaitTermination(true)
+                .awaitTerminationPeriod(DNS_FILTER_SHUTDOWN_GRACE)
+                .build();
+    }
+
+    @Bean(DNS_FILTER_SWEEP_EXECUTOR)
+    public ThreadPoolTaskExecutor dnsFilterSweepExecutor() {
+        return new ThreadPoolTaskExecutorBuilder()
+                .corePoolSize(DNS_FILTER_SWEEP_THREADS)
+                .maxPoolSize(DNS_FILTER_SWEEP_THREADS)
+                .queueCapacity(DNS_FILTER_SWEEP_QUEUE_CAPACITY)
+                .threadNamePrefix(DNS_FILTER_SWEEP_THREAD_PREFIX)
                 .awaitTermination(true)
                 .awaitTerminationPeriod(DNS_FILTER_SHUTDOWN_GRACE)
                 .build();
