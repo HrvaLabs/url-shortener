@@ -148,6 +148,20 @@ class DefaultDnsFilterCheckServiceTest {
     }
 
     @Test
+    void anAllowRuleOnTheFinalHostSkipsThatHost() {
+        link.setFinalUrl("https://allowed.example/landing");
+        lenient().when(linkCheckService.isAllowListed(DESTINATION)).thenReturn(false);
+        when(linkCheckService.isAllowListed("https://allowed.example/landing")).thenReturn(true);
+        when(dnsFilterService.lookup(HOST)).thenReturn(report(HOST, answer(QUAD9, NOT_BLOCKED)));
+
+        final var result = service.check(LINK_ID);
+
+        assertThat(result).isEqualTo(DnsFilterCheckResult.CLEAN);
+        verify(dnsFilterService, never()).lookup("allowed.example");
+        verifyNoInteractions(reviewQueueService, moderationService);
+    }
+
+    @Test
     void noBlockWithAnUnansweredFilterIsRetry() {
         when(dnsFilterService.lookup(HOST)).thenReturn(report(HOST, answer(QUAD9, NOT_BLOCKED), answer(CLOUDFLARE, NO_ANSWER)));
 

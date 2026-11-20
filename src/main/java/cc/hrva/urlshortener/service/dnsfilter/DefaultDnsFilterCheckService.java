@@ -87,8 +87,9 @@ public class DefaultDnsFilterCheckService implements DnsFilterCheckService {
         }
     }
 
-    private static List<String> hostsOf(final Url url, final String destination) {
+    private List<String> hostsOf(final Url url, final String destination) {
         return Stream.concat(Stream.of(destination), Stream.ofNullable(url.getFinalUrl())
+                        .filter(finalUrl -> !linkCheckService.isAllowListed(finalUrl))
                         .map(DomainNames::hostOf)
                         .flatMap(Optional::stream)
                         .filter(host -> !DomainNames.isIpLiteral(host)))
