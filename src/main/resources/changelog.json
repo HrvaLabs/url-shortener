@@ -1,10 +1,24 @@
 {
   "releases": [
     {
-      "version": "v2.39",
+      "version": "v2.39.1",
       "date": "2026-11-20",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "The privacy policy names Cloudflare Web Analytics.",
+      "sections": [
+        {
+          "title": "Privacy",
+          "icon": "lock",
+          "items": [
+            "The privacy policy now names Cloudflare Web Analytics, which counts visits to the few pages served at hrva.cc itself rather than by the app, such as the API reference, and says what its script sends. The app still loads no analytics scripts."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.39",
+      "date": "2026-11-20",
       "summary": "Links are also checked against security DNS filters.",
       "sections": [
         {

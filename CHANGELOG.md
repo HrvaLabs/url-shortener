@@ -4,6 +4,15 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.39.1] — 2026-11-20
+
+The privacy policy names Cloudflare Web Analytics.
+
+### 🔒 Privacy
+- The privacy policy now names Cloudflare Web Analytics, which counts visits to the few pages served at hrva.cc itself rather than by the app, such as the API reference, and says what its script sends. The app still loads no analytics scripts.
+
+---
+
 ## [v2.39] — 2026-11-20
 
 Links are also checked against security DNS filters.
