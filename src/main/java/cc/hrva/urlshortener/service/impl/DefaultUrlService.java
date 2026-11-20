@@ -64,6 +64,7 @@ import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.alias.AliasRules;
 import cc.hrva.urlshortener.service.burst.CreatedLink;
 import cc.hrva.urlshortener.service.campaign.UrlShapes;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterCheckService;
 import cc.hrva.urlshortener.service.domain.CustomDomainHostnames;
 import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
 import cc.hrva.urlshortener.service.domain.DomainRoute;
@@ -203,6 +204,7 @@ public class DefaultUrlService implements UrlService {
     private final ScammerSignalService scammerSignalService;
     private final ClickCheckService clickCheckService;
     private final RedirectChainService redirectChainService;
+    private final DnsFilterCheckService dnsFilterCheckService;
     private final TransactionOperations transactionOperations;
     private final ReservedAliasService reservedAliasService;
     private final BurstAlertService burstAlertService;
@@ -265,6 +267,7 @@ public class DefaultUrlService implements UrlService {
                     : Optional.of(madeWithoutAnAccount(createUrlForAnonymousUser(url, verdict, signals), signals, newWarningPageLink));
         })).orElseGet(() -> saveNoLongerHeld(url, verdict, newWarningPageLink));
         checkRedirectsLater(created.id());
+        checkDnsFiltersLater(created.id());
         if (currentUser != null && !AdminTwoStep.hasAdminPowers(currentUser)) {
             checkAccountSignInFormLater(created, verdict, currentUser);
         }
@@ -379,6 +382,7 @@ public class DefaultUrlService implements UrlService {
             return saveUrlForUser(url, apiKey.getOwner(), verdict);
         });
         checkRedirectsLater(created.id());
+        checkDnsFiltersLater(created.id());
         if (!AdminTwoStep.hasAdminPowers(apiKey.getOwner())) {
             checkAccountSignInFormLater(created, verdict, apiKey.getOwner());
         }
@@ -646,6 +650,7 @@ public class DefaultUrlService implements UrlService {
             return UrlResponse.from(saved);
         }));
         checkRedirectsLater(activated.id());
+        checkDnsFiltersLater(activated.id());
         if (!byAdmin) {
             checkAccountSignInFormLater(activated, verdict, url.getOwner());
         }
@@ -736,6 +741,7 @@ public class DefaultUrlService implements UrlService {
         }
         if (destinationChanged || turnOn) {
             checkRedirectsLater(updated.id());
+            checkDnsFiltersLater(updated.id());
         }
         if ((destinationChanged || turnOn) && !editor.admin()) {
             checkAccountSignInFormLater(updated, destinationChanged ? verdict : turnOnVerdict, editor.user());
@@ -836,6 +842,14 @@ public class DefaultUrlService implements UrlService {
             redirectChainService.checkLater(urlId);
         } catch (final RuntimeException exception) {
             log.warn("Could not schedule the redirect check, the nightly scan picks it up urlId={}", urlId, exception);
+        }
+    }
+
+    private void checkDnsFiltersLater(final long urlId) {
+        try {
+            dnsFilterCheckService.checkLater(urlId);
+        } catch (final RuntimeException exception) {
+            log.warn("Could not schedule the DNS filter check urlId={} exception={}", urlId, exception.getClass().getName());
         }
     }
 

@@ -45,6 +45,7 @@ import cc.hrva.urlshortener.service.LinkPreviewService;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.QrCodeService;
 import cc.hrva.urlshortener.service.RedirectChainService;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterCheckService;
 import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.alias.AliasRules;
 import cc.hrva.urlshortener.service.ReviewQueueService;
@@ -202,6 +203,9 @@ class ApiKeyUseOnCreateFlowTest {
 
     @MockitoBean
     private RedirectChainService redirectChainService;
+
+    @MockitoBean
+    private DnsFilterCheckService dnsFilterCheckService;
 
     @MockitoBean
     private BurstAlertService burstAlertService;

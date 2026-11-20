@@ -3,12 +3,14 @@ package cc.hrva.urlshortener.repository;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import cc.hrva.urlshortener.dto.LinkDestination;
 import cc.hrva.urlshortener.dto.abuse.AbuseReportLink;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
+import cc.hrva.urlshortener.util.DomainNames;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -133,6 +135,17 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
 
     @Query("select new cc.hrva.urlshortener.dto.LinkDestination(u.id, u.longUrl) from Url u where u.active = true and u.id > :afterId order by u.id")
     List<LinkDestination> findActiveDestinationsAfter(@Param("afterId") long afterId, Pageable pageable);
+
+    default List<Long> findActiveIdsPointingAt(final String host) {
+        return findActiveDestinationsWithHostLike(host.toLowerCase(Locale.ROOT)).stream()
+                .filter(destination -> DomainNames.hostOf(destination.longUrl()).filter(host::equalsIgnoreCase).isPresent())
+                .map(LinkDestination::id)
+                .toList();
+    }
+
+    @Query("select new cc.hrva.urlshortener.dto.LinkDestination(u.id, u.longUrl) from Url u "
+            + "where u.active = true and lower(u.longUrl) like concat('%://', :host, '%') order by u.id")
+    List<LinkDestination> findActiveDestinationsWithHostLike(@Param("host") String host);
 
     @Query("select new cc.hrva.urlshortener.dto.LinkDestination(u.id, u.longUrl) from Url u where u.id in :ids")
     List<LinkDestination> findDestinationsByIdIn(@Param("ids") Collection<Long> ids);

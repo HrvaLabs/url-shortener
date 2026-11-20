@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterCheckService;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Duration;
@@ -254,6 +255,9 @@ class UrlServiceTest {
     private RedirectChainService redirectChainService;
 
     @Mock
+    private DnsFilterCheckService dnsFilterCheckService;
+
+    @Mock
     private ReservedAliasService reservedAliasService;
 
     @Mock
@@ -334,6 +338,7 @@ class UrlServiceTest {
                 scammerSignalService,
                 clickCheckService,
                 redirectChainService,
+                dnsFilterCheckService,
                 TransactionOperations.withoutTransaction(),
                 reservedAliasService,
                 burstAlertService,
@@ -2550,6 +2555,7 @@ class UrlServiceTest {
         return new DefaultUrlService(userService, urlValidator, apiKeyService, urlRepository, appProperties, apiKeyValidator, clickAnalyticsService,
                 urlToPeekUrlConverter, createUrlToUrlConverter, urlUpdateDtoToUrlConverter, urlCache, objectMapper, meterRegistry,
                 passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService, redirectChainService,
+                dnsFilterCheckService,
                 transactionOperations, reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository,
                 campaignService, settingsService, withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService, destinationChangeService, linkInspectionService,
                 newAccounts, moderationService, aliasRules);
@@ -3896,6 +3902,54 @@ class UrlServiceTest {
         urlService.activateUrl(1L);
 
         verify(redirectChainService).checkLater(1L);
+    }
+
+    @Test
+    void reactivatingALinkChecksItAgainstTheDnsFilters() {
+        final var url = Url.builder().id(1L).shortUrl("promo").longUrl("https://example.com").active(false).build();
+        when(urlRepository.findById(1L)).thenReturn(Optional.of(url));
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        urlService.activateUrl(1L);
+
+        verify(dnsFilterCheckService).checkLater(1L);
+    }
+
+    @Test
+    void creatingALinkChecksItAgainstTheDnsFiltersAndAFailingExecutorNeverFailsIt() {
+        final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
+        final var url = Url.builder().longUrl("https://example.com/menu").build();
+        when(createUrlToUrlConverter.convert(createUrlDto)).thenReturn(url);
+        when(userService.getUserFromToken()).thenReturn(User.builder().id(1L).build());
+        when(appProperties.getShortUrlLength()).thenReturn(5L);
+        when(urlRepository.save(url)).thenReturn(persisted(url));
+        org.mockito.Mockito.doThrow(new org.springframework.core.task.TaskRejectedException("executor is shutting down"))
+                .when(dnsFilterCheckService).checkLater(1L);
+
+        final var result = urlService.saveUrlRouting(createUrlDto, CLIENT_IP, CreatedVia.WEB);
+
+        assertThat(result.id()).isEqualTo(1L);
+        verify(dnsFilterCheckService).checkLater(1L);
+    }
+
+    @Test
+    void repointingALinkChecksTheNewDestinationAgainstTheDnsFiltersAndAPlainEditDoesNot() {
+        final var url = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).build();
+        final var plain = UrlUpdateDto.builder().id(7L).tags(java.util.Set.of("x")).build();
+        final var unchanged = Url.builder().id(7L).shortUrl("abc").longUrl("https://old.example").visits(0L).active(true).build();
+        final var update = UrlUpdateDto.builder().id(7L).longUrl("https://new.example").build();
+        final var changed = Url.builder().id(7L).shortUrl("abc").longUrl("https://new.example").visits(0L).active(true).build();
+        when(userService.getUserFromToken()).thenReturn(admin());
+        when(urlRepository.findById(7L)).thenReturn(Optional.of(url));
+        when(urlRepository.save(url)).thenReturn(url);
+        when(urlUpdateDtoToUrlConverter.convert(plain)).thenReturn(unchanged);
+        when(urlUpdateDtoToUrlConverter.convert(update)).thenReturn(changed);
+
+        urlService.updateUrl(plain, null);
+        verify(dnsFilterCheckService, never()).checkLater(anyLong());
+
+        urlService.updateUrl(update, null);
+        verify(dnsFilterCheckService).checkLater(7L);
     }
 
     @Test
@@ -5699,7 +5753,7 @@ class UrlServiceTest {
         return new DefaultUrlService(userService, urlValidator, apiKeyService, urlRepository, appProperties, apiKeyValidator, clickAnalyticsService,
                 urlToPeekUrlConverter, createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(urls, mock(TaskScheduler.class), Clock.systemUTC()), objectMapper,
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), passwordEncoder, suspiciousUrlService, rateLimiter,
-                reviewQueueService, scammerSignalService, clickCheckService, redirectChainService, TransactionOperations.withoutTransaction(),
+                reviewQueueService, scammerSignalService, clickCheckService, redirectChainService, dnsFilterCheckService, TransactionOperations.withoutTransaction(),
                 reservedAliasService, burstAlertService, destinationCheckRepository, customDomainRegistry, customDomainRepository, campaignService, settingsService,
                 withoutTransactions, anonymousLinkSignals, LinkWarningTemplates.engine(), humanCheckService, signInFormCheckService, destinationChangeService, linkInspectionService,
                 newAccounts, moderationService, aliasRules);
@@ -5764,6 +5818,7 @@ class UrlServiceTest {
                 scammerSignalService,
                 clickCheckService,
                 redirectChainService,
+                dnsFilterCheckService,
                 TransactionOperations.withoutTransaction(),
                 reservedAliasService,
                 burstAlertService,
@@ -5851,6 +5906,7 @@ class UrlServiceTest {
                 scammerSignalService,
                 clickCheckService,
                 redirectChainService,
+                dnsFilterCheckService,
                 new TransactionTemplate(transactionManager),
                 reservedAliasService,
                 burstAlertService,
@@ -5890,6 +5946,7 @@ class UrlServiceTest {
                 scammerSignalService,
                 clickCheckService,
                 redirectChainService,
+                dnsFilterCheckService,
                 TransactionOperations.withoutTransaction(),
                 reservedAliasService,
                 burstAlertService,
@@ -5925,6 +5982,7 @@ class UrlServiceTest {
                 scammerSignalService,
                 clickCheckService,
                 redirectChainService,
+                dnsFilterCheckService,
                 TransactionOperations.withoutTransaction(),
                 reservedAliasService,
                 burstAlertService,

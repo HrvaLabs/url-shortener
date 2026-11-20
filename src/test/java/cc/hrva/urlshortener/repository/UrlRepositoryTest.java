@@ -66,6 +66,22 @@ class UrlRepositoryTest {
     }
 
     @Test
+    void findActiveIdsPointingAtMatchesTheExactHostOnly() {
+        final var upperCase = linkTo("a", "https://Poshmark.id653655.shop/1");
+        final var withPort = linkTo("b", "http://poshmark.id653655.shop:8080");
+        final var withQuery = linkTo("c", "https://poshmark.id653655.shop?a=1");
+        linkTo("d", "https://poshmark.id653655.shop.evil.test/");
+        linkTo("e", "https://x.poshmark.id653655.shop/");
+        linkTo("f", "https://evil.test/?next=https://poshmark.id653655.shop/");
+        final var inactive = linkTo("g", "https://poshmark.id653655.shop/off");
+        inactive.setActive(false);
+        entityManager.flush();
+
+        assertThat(urlRepository.findActiveIdsPointingAt("poshmark.id653655.shop"))
+                .containsExactlyInAnyOrder(upperCase.getId(), withPort.getId(), withQuery.getId());
+    }
+
+    @Test
     void onlyActiveLinksPastTheirExpiryAreDueToBeSwitchedOff() {
         final var expired = link("old", LocalDateTime.now().minusMinutes(5));
         link("fresh", LocalDateTime.now().plusDays(1));

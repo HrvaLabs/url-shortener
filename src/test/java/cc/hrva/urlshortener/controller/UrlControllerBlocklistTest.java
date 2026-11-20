@@ -28,6 +28,7 @@ import cc.hrva.urlshortener.service.LinkPreviewService;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.QrCodeService;
 import cc.hrva.urlshortener.service.RedirectChainService;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterCheckService;
 import cc.hrva.urlshortener.service.ReservedAliasService;
 import cc.hrva.urlshortener.service.alias.AliasRules;
 import cc.hrva.urlshortener.service.ReviewQueueService;
@@ -163,6 +164,9 @@ class UrlControllerBlocklistTest {
     private RedirectChainService redirectChainService;
 
     @Mock
+    private DnsFilterCheckService dnsFilterCheckService;
+
+    @Mock
     private ClientIpResolver clientIpResolver;
 
     @Mock
@@ -192,7 +196,7 @@ class UrlControllerBlocklistTest {
         final var urlService = new DefaultUrlService(userService, urlValidator, apiKeyService, urlRepository, appProperties, apiKeyValidator,
                 clickAnalyticsService, new UrlToPeekUrlConverter(), createUrlToUrlConverter, urlUpdateDtoToUrlConverter, new UrlCache(cacheManager, mock(TaskScheduler.class), Clock.systemUTC()),
                 objectMapper, meterRegistry, passwordEncoder, suspiciousUrlService, rateLimiter, reviewQueueService, scammerSignalService, clickCheckService,
-                redirectChainService, TransactionOperations.withoutTransaction(), reservedAliasService, burstAlertService,
+                redirectChainService, dnsFilterCheckService, TransactionOperations.withoutTransaction(), reservedAliasService, burstAlertService,
                 destinationCheckRepository, customDomainRegistry, customDomainRepository, campaignService, settingsService,
                 mock(PlatformTransactionManager.class), mock(AnonymousLinkSignals.class), LinkWarningTemplates.engine(),
                 mock(HumanCheckService.class), mock(SignInFormCheckService.class), mock(DestinationChangeService.class),

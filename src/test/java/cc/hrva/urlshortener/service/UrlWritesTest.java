@@ -1,5 +1,6 @@
 package cc.hrva.urlshortener.service;
 
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterCheckService;
 import cc.hrva.urlshortener.configuration.ClockConfiguration;
 import cc.hrva.urlshortener.controller.LinkWarningView;
 import cc.hrva.urlshortener.model.enums.ReportCategory;
@@ -191,6 +192,9 @@ class UrlWritesTest {
 
     @MockitoBean
     private RedirectChainService redirectChainService;
+
+    @MockitoBean
+    private DnsFilterCheckService dnsFilterCheckService;
 
     @MockitoBean
     private ReservedAliasService reservedAliasService;
