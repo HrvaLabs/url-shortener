@@ -26,13 +26,13 @@
     {
       "version": "v2.38",
       "date": "2026-11-20",
-      "summary": "New accounts show in Discord with their email address, masked.",
+      "summary": "Admin alerts for new accounts move to Discord.",
       "sections": [
         {
           "title": "Admin",
           "icon": "wrench",
           "items": [
-            "The Discord alert for a new account shows its email address, masked (k***@gmail.com), like the New user email. You can turn off the New user notice, Admin daily email and Weekly digest by email in Site settings and keep these in Discord."
+            "The Discord alert for a new account now says enough to replace the New user email. You can turn off the New user notice, Admin daily email and Weekly digest by email in Site settings and keep these in Discord."
           ]
         }
       ]

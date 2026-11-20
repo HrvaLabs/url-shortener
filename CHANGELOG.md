@@ -18,10 +18,10 @@ Links are also checked against security DNS filters.
 
 ## [v2.38] — 2026-11-20
 
-New accounts show in Discord with their email address, masked.
+Admin alerts for new accounts move to Discord.
 
 ### 🔧 Admin
-- The Discord alert for a new account shows its email address, masked (k***@gmail.com), like the New user email. You can turn off the New user notice, Admin daily email and Weekly digest by email in Site settings and keep these in Discord.
+- The Discord alert for a new account now says enough to replace the New user email. You can turn off the New user notice, Admin daily email and Weekly digest by email in Site settings and keep these in Discord.
 
 ---
 
