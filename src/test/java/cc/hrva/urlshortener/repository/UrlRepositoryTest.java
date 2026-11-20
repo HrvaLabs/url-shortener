@@ -82,6 +82,26 @@ class UrlRepositoryTest {
     }
 
     @Test
+    void findActiveIdsCreatedBetweenIsHalfOpen() {
+        final var from = LocalDateTime.of(2026, 11, 19, 10, 45);
+        final var to = LocalDateTime.of(2026, 11, 19, 11, 0);
+        final var before = linkTo("a", "https://a.example/");
+        final var atFrom = linkTo("b", "https://b.example/");
+        final var inside = linkTo("c", "https://c.example/");
+        final var atTo = linkTo("d", "https://d.example/");
+        final var inactive = linkTo("e", "https://e.example/");
+        inactive.setActive(false);
+        createdAt(before, from.minusSeconds(1));
+        createdAt(atFrom, from);
+        createdAt(inside, from.plusMinutes(7));
+        createdAt(atTo, to);
+        createdAt(inactive, from.plusMinutes(8));
+        entityManager.flush();
+
+        assertThat(urlRepository.findActiveIdsCreatedBetween(from, to)).containsExactly(atFrom.getId(), inside.getId());
+    }
+
+    @Test
     void onlyActiveLinksPastTheirExpiryAreDueToBeSwitchedOff() {
         final var expired = link("old", LocalDateTime.now().minusMinutes(5));
         link("fresh", LocalDateTime.now().plusDays(1));

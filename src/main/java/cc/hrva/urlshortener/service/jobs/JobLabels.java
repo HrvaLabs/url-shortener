@@ -64,6 +64,8 @@ public final class JobLabels {
         labels.put("DefaultScheduledService.deactivateUnusedUserAccounts", "Warn and turn off unused accounts");
         labels.put("DefaultScheduledService.sendWeeklyDigest", "Send the weekly digest");
         labels.put("DefaultScheduledService.sendWeeklyClickSummaries", "Send weekly click summaries");
+        labels.put("DefaultScheduledService.recheckFreshLinksWithDnsFilters", "Check new links against DNS filters again");
+        labels.put("DefaultScheduledService.sweepDnsFilters", "Check all links against DNS filters");
         return Collections.unmodifiableSequencedMap(labels);
     }
 

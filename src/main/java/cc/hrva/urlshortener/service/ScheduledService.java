@@ -26,5 +26,7 @@ public interface ScheduledService {
     void reloadCustomDomainRoutes();
     void checkTraffic();
     void recheckReportedDomains();
+    void recheckFreshLinksWithDnsFilters();
+    void sweepDnsFilters();
 
 }

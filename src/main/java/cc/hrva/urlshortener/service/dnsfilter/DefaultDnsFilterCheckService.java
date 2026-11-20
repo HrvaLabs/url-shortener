@@ -11,8 +11,16 @@ import cc.hrva.urlshortener.service.SettingsService;
 import cc.hrva.urlshortener.service.SuspiciousUrlService;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.util.DomainNames;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.LinkedHashSet;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -33,6 +41,8 @@ public class DefaultDnsFilterCheckService implements DnsFilterCheckService {
     private static final String VIA = "dns-filter-check";
     private static final String FILTER_SEPARATOR = ", ";
     private static final String REVIEW_REASON_PREFIX = "blocked by DNS filter ";
+    private static final Duration RECHECK_WINDOW = Duration.ofMinutes(15);
+    private static final List<Duration> RECHECK_AGES = List.of(Duration.ofHours(1), Duration.ofHours(6), Duration.ofHours(24));
 
     private final UrlRepository urlRepository;
     private final DnsFilterService dnsFilterService;
@@ -40,6 +50,7 @@ public class DefaultDnsFilterCheckService implements DnsFilterCheckService {
     private final LinkCheckService linkCheckService;
     private final ModerationService moderationService;
     private final ReviewQueueService reviewQueueService;
+    private final Clock clock;
 
     @Override
     public DnsFilterCheckResult check(final long urlId) {
@@ -85,6 +96,42 @@ public class DefaultDnsFilterCheckService implements DnsFilterCheckService {
         } catch (final RuntimeException exception) {
             log.warn("Could not check a link against the DNS filters urlId={}", urlId, exception);
         }
+    }
+
+    @Async(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR)
+    @Override
+    public void recheckFresh() {
+        final var now = LocalDateTime.now(clock);
+        final var ids = new LinkedHashSet<Long>();
+        RECHECK_AGES.forEach(age -> ids.addAll(urlRepository.findActiveIdsCreatedBetween(now.minus(age).minus(RECHECK_WINDOW), now.minus(age))));
+        final var results = checkAll(ids);
+        log.info("DNS filter recheck of new links finished links={} results={}", ids.size(), results);
+    }
+
+    @Async(AsyncExecutorConfiguration.NOTIFICATION_TASK_EXECUTOR)
+    @Override
+    public void sweep() {
+        final var ids = urlRepository.findActiveIds();
+        final var results = checkAll(ids);
+        log.info("DNS filter sweep finished links={} results={}", ids.size(), results);
+    }
+
+    private Map<DnsFilterCheckResult, Integer> checkAll(final Collection<Long> ids) {
+        final var results = new EnumMap<DnsFilterCheckResult, Integer>(DnsFilterCheckResult.class);
+        Arrays.stream(DnsFilterCheckResult.values()).forEach(result -> results.put(result, 0));
+        var failed = 0;
+        for (final var id : ids) {
+            try {
+                results.merge(check(id), 1, Integer::sum);
+            } catch (final RuntimeException exception) {
+                failed++;
+                log.warn("Could not check a link against the DNS filters urlId={}", id, exception);
+            }
+        }
+        if (failed > 0) {
+            log.warn("Links that could not be checked against the DNS filters failed={}", failed);
+        }
+        return results;
     }
 
     private List<String> hostsOf(final Url url, final String destination) {

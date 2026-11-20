@@ -7,7 +7,10 @@ import cc.hrva.urlshortener.service.LinkCheckService;
 import cc.hrva.urlshortener.service.ModerationService;
 import cc.hrva.urlshortener.service.ReviewQueueService;
 import cc.hrva.urlshortener.service.SettingsService;
+import cc.hrva.urlshortener.service.notification.MutableClock;
 import cc.hrva.urlshortener.service.settings.SettingKey;
+import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +35,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -64,11 +68,13 @@ class DefaultDnsFilterCheckServiceTest {
 
     private DnsFilterCheckService service;
 
+    private final MutableClock clock = new MutableClock(Instant.parse("2026-11-19T12:00:00Z"));
+
     private final Url link = Url.builder().id(LINK_ID).shortUrl("abc").longUrl(DESTINATION).active(true).build();
 
     @BeforeEach
     void setUp() {
-        service = new DefaultDnsFilterCheckService(urlRepository, dnsFilterService, settingsService, linkCheckService, moderationService, reviewQueueService);
+        service = new DefaultDnsFilterCheckService(urlRepository, dnsFilterService, settingsService, linkCheckService, moderationService, reviewQueueService, clock);
         lenient().when(urlRepository.findById(LINK_ID)).thenReturn(Optional.of(link));
         lenient().when(settingsService.isOn(SettingKey.DNS_FILTER_CHECK)).thenReturn(true);
         lenient().when(settingsService.number(SettingKey.DNS_FILTERS_TO_BLOCK)).thenReturn(2);
@@ -231,6 +237,62 @@ class DefaultDnsFilterCheckServiceTest {
         assertThat(output.getOut()).contains("Could not check a link against the DNS filters urlId=7");
         verify(moderationService, never()).blockLink(anyLong(), any(), any(), any(), any());
         verify(reviewQueueService, never()).flag(any(), anyList());
+    }
+
+    @Test
+    void recheckFreshPicksLinksOneSixAndTwentyFourHoursOld() {
+        when(urlRepository.findActiveIdsCreatedBetween(LocalDateTime.of(2026, 11, 19, 10, 45), LocalDateTime.of(2026, 11, 19, 11, 0))).thenReturn(List.of(LINK_ID, 8L));
+        when(urlRepository.findActiveIdsCreatedBetween(LocalDateTime.of(2026, 11, 19, 5, 45), LocalDateTime.of(2026, 11, 19, 6, 0))).thenReturn(List.of(LINK_ID));
+        when(urlRepository.findActiveIdsCreatedBetween(LocalDateTime.of(2026, 11, 18, 11, 45), LocalDateTime.of(2026, 11, 18, 12, 0))).thenReturn(List.of(9L));
+        when(dnsFilterService.lookup(HOST)).thenReturn(report(HOST, answer(QUAD9, NOT_BLOCKED)));
+
+        service.recheckFresh();
+
+        verify(urlRepository, times(1)).findById(LINK_ID);
+        verify(urlRepository).findById(8L);
+        verify(urlRepository).findById(9L);
+        verify(dnsFilterService, times(1)).lookup(HOST);
+    }
+
+    @Test
+    void recheckFreshChecksNothingWhenNoLinkIsThatOld() {
+        service.recheckFresh();
+
+        verify(urlRepository, never()).findById(anyLong());
+        verifyNoInteractions(dnsFilterService);
+    }
+
+    @Test
+    void sweepChecksEveryActiveLinkAndLogsTheCountsPerResult(final CapturedOutput output) {
+        when(urlRepository.findActiveIds()).thenReturn(List.of(LINK_ID, 8L, 99L));
+        when(urlRepository.findById(8L)).thenReturn(Optional.of(Url.builder().id(8L).shortUrl("def").longUrl("https://evil.example/").active(true).build()));
+        when(urlRepository.findById(99L)).thenReturn(Optional.empty());
+        when(dnsFilterService.lookup(HOST)).thenReturn(report(HOST, answer(QUAD9, NOT_BLOCKED)));
+        when(dnsFilterService.lookup("evil.example")).thenReturn(report("evil.example", answer(QUAD9, BLOCKED)));
+
+        service.sweep();
+
+        verify(dnsFilterService).lookup(HOST);
+        verify(dnsFilterService).lookup("evil.example");
+        assertThat(output.getOut()).contains("DNS filter sweep finished links=3 results={BLOCKED=0, FLAGGED=1, CLEAN=1, RETRY=0, SKIPPED=1}");
+    }
+
+    @Test
+    void sweepKeepsGoingWhenOneLinkFails(final CapturedOutput output) {
+        when(urlRepository.findActiveIds()).thenReturn(List.of(LINK_ID, 8L));
+        when(urlRepository.findById(8L)).thenReturn(Optional.of(Url.builder().id(8L).shortUrl("def").longUrl("https://fine.example/").active(true).build()));
+        when(dnsFilterService.lookup(HOST)).thenThrow(new IllegalStateException("resolver down"));
+        when(dnsFilterService.lookup("fine.example")).thenReturn(report("fine.example", answer(QUAD9, NOT_BLOCKED)));
+
+        service.sweep();
+
+        assertThat(output.getOut()).contains("Could not check a link against the DNS filters urlId=7").contains("failed=1").contains("CLEAN=1");
+    }
+
+    @Test
+    void theRechecksAndTheSweepRunInTheBackground() throws NoSuchMethodException {
+        assertThat(DefaultDnsFilterCheckService.class.getMethod("recheckFresh").getAnnotation(Async.class)).isNotNull();
+        assertThat(DefaultDnsFilterCheckService.class.getMethod("sweep").getAnnotation(Async.class)).isNotNull();
     }
 
     private static DnsFilterReport report(final String host, final DnsFilterAnswer... answers) {

@@ -85,6 +85,9 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     @Query("select u.id from Url u where u.active = true order by u.id")
     List<Long> findActiveIds();
 
+    @Query("select u.id from Url u where u.active = true and u.createDate >= :from and u.createDate < :to order by u.id")
+    List<Long> findActiveIdsCreatedBetween(@Param("from") LocalDateTime from, @Param("to") LocalDateTime to);
+
     @Query("select u.id from Url u where u.id in :ids")
     List<Long> findExistingIds(@Param("ids") Collection<Long> ids);
 

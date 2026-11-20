@@ -4,5 +4,7 @@ public interface DnsFilterCheckService {
 
     DnsFilterCheckResult check(long urlId);
     void checkLater(long urlId);
+    void recheckFresh();
+    void sweep();
 
 }

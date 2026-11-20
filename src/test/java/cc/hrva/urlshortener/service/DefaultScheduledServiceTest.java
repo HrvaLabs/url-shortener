@@ -5,6 +5,7 @@ import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.repository.AuditLogRepository;
 import cc.hrva.urlshortener.repository.BioHandleHoldRepository;
 import cc.hrva.urlshortener.repository.EmailLogRepository;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterCheckService;
 import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
 import cc.hrva.urlshortener.service.domain.CustomDomainReconciler;
 import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
@@ -110,12 +111,15 @@ class DefaultScheduledServiceTest {
     @Mock
     private AbuseReportService abuseReportService;
 
+    @Mock
+    private DnsFilterCheckService dnsFilterCheckService;
+
     private final AppProperties appProperties = new AppProperties();
 
     @BeforeEach
     void setUp() {
         this.scheduledService = new DefaultScheduledService(urlService, userService, apiKeyService, resetTokenService, urlNotificationService, safeBrowsingRecheckService, sendingEmailService, linkDigestService, blocklistSourceService,
-                weeklyDigestService, destinationCheckService, notificationDeliveryService, clickSummaryService, customDomainLifecycle, customDomainReconciler, customDomainRegistry, trafficAlertService, abuseReportService, bioHandleHoldRepository, emailLogRepository, auditLogRepository, appProperties, Clock.fixed(NOW, ZoneOffset.UTC));
+                weeklyDigestService, destinationCheckService, notificationDeliveryService, clickSummaryService, customDomainLifecycle, customDomainReconciler, customDomainRegistry, trafficAlertService, abuseReportService, dnsFilterCheckService, bioHandleHoldRepository, emailLogRepository, auditLogRepository, appProperties, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -232,6 +236,33 @@ class DefaultScheduledServiceTest {
         assertThat(scheduled.cron()).isEqualTo("0 20 6 * * *");
         assertThat(scheduled.zone()).isEqualTo("${app.analytics.zone}");
         assertThat(nextRun(CronExpression.parse(scheduled.cron()), "2026-10-30T06:00:00Z", zone)).isEqualTo("2026-10-31T05:20:00Z");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void theDnsFilterRecheckOfNewLinksDelegates(final CapturedOutput output) {
+        scheduledService.recheckFreshLinksWithDnsFilters();
+
+        verify(dnsFilterCheckService).recheckFresh();
+        assertThat(output).contains("Scheduled: DNS filter recheck of new links");
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void theDnsFilterSweepDelegates(final CapturedOutput output) {
+        scheduledService.sweepDnsFilters();
+
+        verify(dnsFilterCheckService).sweep();
+        assertThat(output).contains("Scheduled: DNS filter sweep");
+    }
+
+    @Test
+    void newLinksAreRecheckedEveryFifteenMinutesAndAllLinksSweptAtHalfPastFive() throws NoSuchMethodException {
+        final var recheck = DefaultScheduledService.class.getMethod("recheckFreshLinksWithDnsFilters").getAnnotation(Scheduled.class);
+        final var sweep = DefaultScheduledService.class.getMethod("sweepDnsFilters").getAnnotation(Scheduled.class);
+
+        assertThat(recheck.cron()).isEqualTo("0 */15 * * * *");
+        assertThat(sweep.cron()).isEqualTo("0 30 5 * * *");
     }
 
     private static Instant nextRun(final CronExpression cron, final String after, final ZoneId zone) {

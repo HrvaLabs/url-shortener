@@ -22,6 +22,7 @@ import cc.hrva.urlshortener.service.UrlNotificationService;
 import cc.hrva.urlshortener.service.UrlService;
 import cc.hrva.urlshortener.service.UserService;
 import cc.hrva.urlshortener.service.WeeklyDigestService;
+import cc.hrva.urlshortener.service.dnsfilter.DnsFilterCheckService;
 import cc.hrva.urlshortener.service.domain.CustomDomainLifecycle;
 import cc.hrva.urlshortener.service.domain.CustomDomainReconciler;
 import cc.hrva.urlshortener.service.domain.CustomDomainRegistry;
@@ -55,6 +56,7 @@ public class DefaultScheduledService implements ScheduledService {
     private final CustomDomainRegistry customDomainRegistry;
     private final TrafficAlertService trafficAlertService;
     private final AbuseReportService abuseReportService;
+    private final DnsFilterCheckService dnsFilterCheckService;
     private final BioHandleHoldRepository bioHandleHoldRepository;
     private final EmailLogRepository emailLogRepository;
     private final AuditLogRepository auditLogRepository;
@@ -227,6 +229,20 @@ public class DefaultScheduledService implements ScheduledService {
     public void recheckReportedDomains() {
         log.info("Scheduled: reported domains recheck");
         abuseReportService.recheck();
+    }
+
+    @Override
+    @Scheduled(cron = "0 */15 * * * *")
+    public void recheckFreshLinksWithDnsFilters() {
+        log.info("Scheduled: DNS filter recheck of new links");
+        dnsFilterCheckService.recheckFresh();
+    }
+
+    @Override
+    @Scheduled(cron = "0 30 5 * * *")
+    public void sweepDnsFilters() {
+        log.info("Scheduled: DNS filter sweep");
+        dnsFilterCheckService.sweep();
     }
 
 }
