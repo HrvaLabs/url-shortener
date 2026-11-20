@@ -22,7 +22,9 @@ import org.xbill.DNS.ARecord;
 import org.xbill.DNS.DClass;
 import org.xbill.DNS.Flags;
 import org.xbill.DNS.Message;
+import org.xbill.DNS.Name;
 import org.xbill.DNS.Rcode;
+import org.xbill.DNS.SOARecord;
 import org.xbill.DNS.Section;
 
 class DnsjavaQueryTest {
@@ -63,6 +65,10 @@ class DnsjavaQueryTest {
                     final var host = query.getQuestion().getName();
                     if (host.toString().startsWith("blocked.")) {
                         response.getHeader().setRcode(Rcode.NXDOMAIN);
+                    } else if (host.toString().startsWith("listed.")) {
+                        response.getHeader().setRcode(Rcode.NXDOMAIN);
+                        response.addRecord(new SOARecord(host, DClass.IN, 3600, Name.fromString("cleanbrowsing.rpz.noc.org."),
+                                Name.fromString("accesspolicy.rpz.noc.org."), 1, 7200, 900, 1209600, 86400), Section.AUTHORITY);
                     } else {
                         response.addRecord(new ARecord(host, DClass.IN, 60, InetAddress.getByName("203.0.113.7")), Section.ANSWER);
                     }
@@ -89,14 +95,21 @@ class DnsjavaQueryTest {
     void readsTheRcodeAndTheARecords() throws Exception {
         final var reply = dnsjavaQuery.ask(resolver(), "example.com", Duration.ofSeconds(2)).get(5, TimeUnit.SECONDS);
 
-        assertThat(reply).isEqualTo(new DnsReply(Rcode.NOERROR, List.of("203.0.113.7")));
+        assertThat(reply).isEqualTo(new DnsReply(Rcode.NOERROR, List.of("203.0.113.7"), 0, null));
     }
 
     @Test
     void readsAnNxdomainWithoutAddresses() throws Exception {
         final var reply = dnsjavaQuery.ask(resolver(), "blocked.example", Duration.ofSeconds(2)).get(5, TimeUnit.SECONDS);
 
-        assertThat(reply).isEqualTo(new DnsReply(Rcode.NXDOMAIN, List.of()));
+        assertThat(reply).isEqualTo(new DnsReply(Rcode.NXDOMAIN, List.of(), 0, null));
+    }
+
+    @Test
+    void readsTheAuthorityCountAndTheSoaPrimaryServer() throws Exception {
+        final var reply = dnsjavaQuery.ask(resolver(), "listed.wicar.org", Duration.ofSeconds(2)).get(5, TimeUnit.SECONDS);
+
+        assertThat(reply).isEqualTo(new DnsReply(Rcode.NXDOMAIN, List.of(), 1, "cleanbrowsing.rpz.noc.org"));
     }
 
     @Test
@@ -125,7 +138,7 @@ class DnsjavaQueryTest {
 
             final var reply = dnsjavaQuery.ask(resolver(), "example.com", Duration.ofSeconds(2)).get(5, TimeUnit.SECONDS);
 
-            assertThat(reply).isEqualTo(new DnsReply(Rcode.NOERROR, List.of("198.51.100.9")));
+            assertThat(reply).isEqualTo(new DnsReply(Rcode.NOERROR, List.of("198.51.100.9"), 0, null));
             tcpServer.join(1000);
         }
     }

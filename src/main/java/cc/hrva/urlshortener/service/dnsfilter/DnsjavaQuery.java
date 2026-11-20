@@ -12,6 +12,7 @@ import org.xbill.DNS.DClass;
 import org.xbill.DNS.Message;
 import org.xbill.DNS.Name;
 import org.xbill.DNS.Record;
+import org.xbill.DNS.SOARecord;
 import org.xbill.DNS.Section;
 import org.xbill.DNS.SimpleResolver;
 import org.xbill.DNS.Type;
@@ -49,7 +50,13 @@ public class DnsjavaQuery implements DnsQuery {
                 .filter(ARecord.class::isInstance)
                 .map(record -> ((ARecord) record).getAddress().getHostAddress())
                 .toList();
-        return new DnsReply(message.getRcode(), addresses);
+        final var authority = message.getSection(Section.AUTHORITY);
+        final var primaryServer = authority.stream()
+                .filter(SOARecord.class::isInstance)
+                .map(record -> ((SOARecord) record).getHost().toString(true))
+                .findFirst()
+                .orElse(null);
+        return new DnsReply(message.getRcode(), addresses, authority.size(), primaryServer);
     }
 
 }

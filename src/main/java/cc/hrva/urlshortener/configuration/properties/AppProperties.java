@@ -215,6 +215,10 @@ public class AppProperties {
 
             private List<String> blockAnswers = List.of();
 
+            private boolean nxdomainWithoutAuthority;
+
+            private String nxdomainAuthoritySuffix;
+
         }
 
     }

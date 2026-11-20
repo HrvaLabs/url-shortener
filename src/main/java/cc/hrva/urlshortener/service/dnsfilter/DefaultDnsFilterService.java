@@ -9,10 +9,12 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import lombok.extern.slf4j.Slf4j;
@@ -99,12 +101,16 @@ public class DefaultDnsFilterService implements DnsFilterService {
         final var referenceFutures = dnsFilters.getReferences().stream().map(address -> send(address, asciiHost)).toList();
         awaitAll(filterFutures, referenceFutures);
         final var referenceReplies = referenceFutures.stream().map(DefaultDnsFilterService::replyOf).toList();
-        final var exists = DnsFilterClassifier.exists(referenceReplies);
+        final var exists = DnsFilterClassifier.exists(referenceReplies, blockAnswers());
         final var answers = IntStream.range(0, filters.size())
-                .mapToObj(index -> DnsFilterClassifier.classify(filters.get(index), replyOf(filterFutures.get(index)), exists))
+                .mapToObj(index -> DnsFilterClassifier.classify(filters.get(index), replyOf(filterFutures.get(index)), referenceReplies))
                 .toList();
         final var report = new DnsFilterReport(asciiHost, exists, answers);
         return new Outcome(report, !report.anyUnanswered() && referenceReplies.stream().anyMatch(Optional::isPresent));
+    }
+
+    private Set<String> blockAnswers() {
+        return dnsFilters.getFilters().stream().flatMap(filter -> filter.getBlockAnswers().stream()).collect(Collectors.toSet());
     }
 
     private CompletableFuture<DnsReply> send(final String address, final String asciiHost) {

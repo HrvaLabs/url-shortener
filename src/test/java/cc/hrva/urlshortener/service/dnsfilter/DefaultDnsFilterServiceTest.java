@@ -37,9 +37,12 @@ class DefaultDnsFilterServiceTest {
     private static final String HOST = "malware.wicar.org";
     private static final String REFERENCE_ONE = "9.9.9.10";
     private static final String REFERENCE_TWO = "1.1.1.1";
-    private static final DnsReply NXDOMAIN = new DnsReply(3, List.of());
-    private static final DnsReply SINKHOLE = new DnsReply(0, List.of("0.0.0.0"));
-    private static final DnsReply RESOLVED = new DnsReply(0, List.of("208.94.116.246"));
+    private static final String SINKHOLE_ADDRESS = "0.0.0.0";
+    private static final DnsReply QUAD9_BLOCK = new DnsReply(3, List.of(), 0, null);
+    private static final DnsReply CLEANBROWSING_BLOCK = new DnsReply(3, List.of(), 1, "cleanbrowsing.rpz.noc.org");
+    private static final DnsReply NONEXISTENT = new DnsReply(3, List.of(), 1, "a.gtld-servers.net");
+    private static final DnsReply SINKHOLE = new DnsReply(0, List.of(SINKHOLE_ADDRESS), 0, null);
+    private static final DnsReply RESOLVED = new DnsReply(0, List.of("208.94.116.246"), 0, null);
     private static final Map<DnsFilterProvider, String> ADDRESSES = Map.of(
             DnsFilterProvider.QUAD9, "9.9.9.9",
             DnsFilterProvider.CLOUDFLARE, "1.1.1.2",
@@ -61,8 +64,8 @@ class DefaultDnsFilterServiceTest {
         redisTemplate = mock(StringRedisTemplate.class);
         redis.backing(redisTemplate);
         final var appProperties = new AppProperties();
-        appProperties.getDnsFilters().setFilters(List.of(filter(DnsFilterProvider.QUAD9), filter(DnsFilterProvider.CLOUDFLARE, "0.0.0.0"),
-                filter(DnsFilterProvider.CLEANBROWSING), filter(DnsFilterProvider.CONTROL_D, "0.0.0.0")));
+        appProperties.getDnsFilters().setFilters(List.of(filter(DnsFilterProvider.QUAD9), filter(DnsFilterProvider.CLOUDFLARE),
+                filter(DnsFilterProvider.CLEANBROWSING), filter(DnsFilterProvider.CONTROL_D)));
         appProperties.getDnsFilters().setReferences(List.of(REFERENCE_ONE, REFERENCE_TWO));
         for (final var provider : DnsFilterProvider.values()) {
             enabled.put(provider, true);
@@ -178,7 +181,7 @@ class DefaultDnsFilterServiceTest {
         script.put(REFERENCE_ONE, host -> CompletableFuture.failedFuture(new IllegalStateException("down")));
         script.put(REFERENCE_TWO, host -> CompletableFuture.failedFuture(new IllegalStateException("down")));
         for (final var provider : DnsFilterProvider.values()) {
-            script.put(ADDRESSES.get(provider), host -> CompletableFuture.completedFuture(NXDOMAIN));
+            script.put(ADDRESSES.get(provider), host -> CompletableFuture.completedFuture(NONEXISTENT));
         }
 
         final var report = dnsFilterService.lookup(HOST);
@@ -217,19 +220,37 @@ class DefaultDnsFilterServiceTest {
                 .allMatch(line -> line.contains("RedisConnectionFailureException"));
     }
 
+    @Test
+    void referencesThatAnswerTheSinkholeGiveNoVerdict() {
+        script.put(REFERENCE_ONE, host -> CompletableFuture.completedFuture(SINKHOLE));
+        script.put(REFERENCE_TWO, host -> CompletableFuture.completedFuture(SINKHOLE));
+
+        final var report = dnsFilterService.lookup(HOST);
+
+        assertThat(report.exists()).isFalse();
+        assertThat(report.answers()).filteredOn(answer -> answer.provider() == DnsFilterProvider.CLOUDFLARE || answer.provider() == DnsFilterProvider.CONTROL_D)
+                .extracting(DnsFilterAnswer::status).containsOnly(DnsFilterStatus.NOT_BLOCKED);
+    }
+
     private static DnsReply blockFor(final DnsFilterProvider provider) {
-        return provider == DnsFilterProvider.CLOUDFLARE || provider == DnsFilterProvider.CONTROL_D ? SINKHOLE : NXDOMAIN;
+        return switch (provider) {
+            case QUAD9 -> QUAD9_BLOCK;
+            case CLEANBROWSING -> CLEANBROWSING_BLOCK;
+            case CLOUDFLARE, CONTROL_D -> SINKHOLE;
+        };
     }
 
     private static DnsFilterProvider providerOf(final SettingKey key) {
         return Arrays.stream(DnsFilterProvider.values()).filter(provider -> provider.settingKey() == key).findFirst().orElse(null);
     }
 
-    private static AppProperties.DnsFilters.Filter filter(final DnsFilterProvider provider, final String... blockAnswers) {
+    private static AppProperties.DnsFilters.Filter filter(final DnsFilterProvider provider) {
         final var filter = new AppProperties.DnsFilters.Filter();
         filter.setProvider(provider);
         filter.setAddress(ADDRESSES.get(provider));
-        filter.setBlockAnswers(List.of(blockAnswers));
+        filter.setBlockAnswers(blockFor(provider) == SINKHOLE ? List.of(SINKHOLE_ADDRESS) : List.of());
+        filter.setNxdomainWithoutAuthority(provider == DnsFilterProvider.QUAD9);
+        filter.setNxdomainAuthoritySuffix(provider == DnsFilterProvider.CLEANBROWSING ? "rpz.noc.org" : null);
         return filter;
     }
 

@@ -157,11 +157,13 @@ app:
     filters:
       - provider: QUAD9
         address: 9.9.9.9
+        nxdomain-without-authority: true
       - provider: CLOUDFLARE
         address: 1.1.1.2
         block-answers: 0.0.0.0
       - provider: CLEANBROWSING
         address: 185.228.168.9
+        nxdomain-authority-suffix: rpz.noc.org
       - provider: CONTROL_D
         address: 76.76.2.1
         block-answers: 0.0.0.0
