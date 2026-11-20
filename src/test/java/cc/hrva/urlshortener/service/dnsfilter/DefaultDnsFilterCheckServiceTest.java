@@ -228,6 +228,43 @@ class DefaultDnsFilterCheckServiceTest {
     }
 
     @Test
+    void blockingFiltersNamesTheFiltersThatStillBlockATurnedOffLink() {
+        link.setActive(false);
+        link.setBlockReason(BlockReason.DNS_FILTERS);
+        when(dnsFilterService.lookup(HOST)).thenReturn(report(HOST, answer(QUAD9, BLOCKED), answer(CLOUDFLARE, BLOCKED), answer(CONTROL_D, NOT_BLOCKED)));
+
+        assertThat(service.blockingFilters(link)).containsExactly("Quad9", "Cloudflare");
+        verifyNoInteractions(moderationService, reviewQueueService);
+    }
+
+    @Test
+    void blockingFiltersNamesTheFiltersThatStillBlockARedirectsFinalHost() {
+        link.setActive(false);
+        link.setFinalUrl("https://evil.example/landing");
+        when(dnsFilterService.lookup(HOST)).thenReturn(report(HOST, answer(QUAD9, NOT_BLOCKED)));
+        when(dnsFilterService.lookup("evil.example")).thenReturn(report("evil.example", answer(QUAD9, BLOCKED), answer(CONTROL_D, BLOCKED)));
+
+        assertThat(service.blockingFilters(link)).containsExactly("Quad9", "Control D");
+    }
+
+    @Test
+    void blockingFiltersIsEmptyUnderAnAllowRule() {
+        link.setActive(false);
+        when(linkCheckService.isAllowListed(DESTINATION)).thenReturn(true);
+
+        assertThat(service.blockingFilters(link)).isEmpty();
+        verifyNoInteractions(dnsFilterService);
+    }
+
+    @Test
+    void blockingFiltersIsEmptyWhenFewerFiltersThanTheThresholdStillBlock() {
+        link.setActive(false);
+        when(dnsFilterService.lookup(HOST)).thenReturn(report(HOST, answer(QUAD9, BLOCKED), answer(CLOUDFLARE, NOT_BLOCKED)));
+
+        assertThat(service.blockingFilters(link)).isEmpty();
+    }
+
+    @Test
     void checkLaterRunsOnTheDnsFilterExecutor() throws NoSuchMethodException {
         final var async = DefaultDnsFilterCheckService.class.getMethod("checkLater", long.class).getAnnotation(Async.class);
 

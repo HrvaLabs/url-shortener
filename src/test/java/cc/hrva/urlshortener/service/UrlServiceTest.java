@@ -3916,6 +3916,52 @@ class UrlServiceTest {
     }
 
     @Test
+    void anAdminCannotTurnOnALinkTheDnsFiltersStillBlock() {
+        final var url = Url.builder().id(1L).shortUrl("promo").longUrl("https://poshmark.id653655.shop/1").active(false)
+                .blockReason(BlockReason.DNS_FILTERS).blockDetail("Quad9, Cloudflare").blockedAt(java.time.LocalDateTime.now()).build();
+        lenient().when(userService.getUserFromToken()).thenReturn(admin());
+        when(urlRepository.findById(1L)).thenReturn(Optional.of(url));
+        when(dnsFilterCheckService.blockingFilters(url)).thenReturn(List.of("Quad9", "Cloudflare"));
+
+        assertThatThrownBy(() -> urlService.activateUrl(1L))
+                .isInstanceOf(UrlValidationException.class)
+                .hasMessage("This destination is still blocked: DNS filters Quad9, Cloudflare. An Allow rule for the domain keeps the link on.");
+
+        verify(urlRepository, never()).save(any());
+        verify(dnsFilterCheckService, never()).checkLater(anyLong());
+        assertThat(url.getBlockReason()).isEqualTo(BlockReason.DNS_FILTERS);
+    }
+
+    @Test
+    void anAdminTurnsOnADnsBlockedLinkOnceTheFiltersNoLongerBlockIt() {
+        final var url = Url.builder().id(1L).shortUrl("promo").longUrl("https://example.com").active(false)
+                .blockReason(BlockReason.DNS_FILTERS).blockDetail("Quad9, Cloudflare").blockedAt(java.time.LocalDateTime.now()).build();
+        when(userService.getUserFromToken()).thenReturn(admin());
+        when(urlRepository.findById(1L)).thenReturn(Optional.of(url));
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(dnsFilterCheckService.blockingFilters(url)).thenReturn(List.of());
+
+        assertThat(urlService.activateUrl(1L).active()).isTrue();
+
+        verify(dnsFilterCheckService).blockingFilters(url);
+        verify(dnsFilterCheckService).checkLater(1L);
+        assertThat(url.getBlockReason()).isNull();
+    }
+
+    @Test
+    void turningOnALinkBlockedForAnotherReasonDoesNotAskTheDnsFilters() {
+        final var url = Url.builder().id(1L).shortUrl("promo").longUrl("https://example.com").active(false)
+                .blockReason(BlockReason.SAFE_BROWSING).blockDetail("MALWARE").blockedAt(java.time.LocalDateTime.now()).build();
+        when(userService.getUserFromToken()).thenReturn(admin());
+        when(urlRepository.findById(1L)).thenReturn(Optional.of(url));
+        when(urlRepository.save(any(Url.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertThat(urlService.activateUrl(1L).active()).isTrue();
+
+        verify(dnsFilterCheckService, never()).blockingFilters(any());
+    }
+
+    @Test
     void creatingALinkChecksItAgainstTheDnsFiltersAndAFailingExecutorNeverFailsIt() {
         final var createUrlDto = CreateUrlDto.builder().longUrl("https://example.com/menu").build();
         final var url = Url.builder().longUrl("https://example.com/menu").build();

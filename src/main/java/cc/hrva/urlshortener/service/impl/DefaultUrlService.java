@@ -168,6 +168,9 @@ public class DefaultUrlService implements UrlService {
     private static final String CLICKS_USED_UP = "This link has used all its clicks. Edit it to raise or remove its visit limit first.";
     private static final String LINK_EXPIRED = "This link has expired. Edit it to set a later expiry or remove it first.";
     private static final String BLOCKED_LINK_NOT_TURNED_ON = "This link is blocked, so saving can't turn it back on.";
+    private static final String DNS_FILTERS_STILL_BLOCK = "This destination is still blocked: DNS filters ";
+    private static final String ALLOW_RULE_KEEPS_IT_ON = ". An Allow rule for the domain keeps the link on.";
+    private static final String FILTER_SEPARATOR = ", ";
     private static final String NO_AUTHORIZATION = "You don't have authorization for this action";
     private static final String WOULD_BLOCK = "The link checks would block this destination";
     private static final String WOULD_REVIEW = "The link checks would send this destination to review";
@@ -632,6 +635,7 @@ public class DefaultUrlService implements UrlService {
         urlValidator.checkIfUrlNotBlocked(url);
         requireCanTurnOn(url, url.getVisitLimit(), url.getExpirationDate());
         final var verdict = checkDestinationToTurnOn(url);
+        requireDnsFiltersNoLongerBlock(url);
         final var byAdmin = AdminTwoStep.hasAdminPowers(userService.getUserFromToken());
 
         final var activated = Objects.requireNonNull(transactionOperations.execute(status -> {
@@ -662,6 +666,17 @@ public class DefaultUrlService implements UrlService {
         requireClicksLeft(link, visitLimit);
         requireNotExpired(link, expirationDate);
         urlValidator.checkIfShortUrlIsFreeToReactivate(link.domainId(), link.getShortUrl());
+    }
+
+    private void requireDnsFiltersNoLongerBlock(final Url url) {
+        if (url.getBlockReason() != BlockReason.DNS_FILTERS) {
+            return;
+        }
+        final var filters = dnsFilterCheckService.blockingFilters(url);
+        if (!filters.isEmpty()) {
+            log.info("Turning on refused, the DNS filters still block the link urlId={} filters={}", url.getId(), filters);
+            throw new UrlValidationException(DNS_FILTERS_STILL_BLOCK + String.join(FILTER_SEPARATOR, filters) + ALLOW_RULE_KEEPS_IT_ON);
+        }
     }
 
     private LinkVerdict checkDestinationToTurnOn(final Url url) {

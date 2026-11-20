@@ -59,12 +59,12 @@ public class DefaultDnsFilterCheckService implements DnsFilterCheckService {
     @Override
     public DnsFilterCheckResult check(final long urlId) {
         final var url = urlRepository.findById(urlId).filter(Url::isActive);
-        if (url.isEmpty() || !settingsService.isOn(SettingKey.DNS_FILTER_CHECK) || linkCheckService.isAllowListed(url.get().getLongUrl())) {
+        if (url.isEmpty() || !isChecked(url.get())) {
             log.info("Link is not checked against the DNS filters urlId={}", urlId);
             return DnsFilterCheckResult.SKIPPED;
         }
 
-        final var destination = DomainNames.hostOf(url.get().getLongUrl()).filter(host -> !DomainNames.isIpLiteral(host));
+        final var destination = destinationOf(url.get());
         if (destination.isEmpty()) {
             return DnsFilterCheckResult.SKIPPED;
         }
@@ -90,6 +90,23 @@ public class DefaultDnsFilterCheckService implements DnsFilterCheckService {
             return DnsFilterCheckResult.FLAGGED;
         }
         return unanswered ? DnsFilterCheckResult.RETRY : DnsFilterCheckResult.CLEAN;
+    }
+
+    @Override
+    public List<String> blockingFilters(final Url url) {
+        final var destination = isChecked(url) ? destinationOf(url) : Optional.<String>empty();
+        if (destination.isEmpty()) {
+            return List.of();
+        }
+        final var threshold = settingsService.number(SettingKey.DNS_FILTERS_TO_BLOCK);
+        return hostsOf(url, destination.get()).stream()
+                .map(dnsFilterService::lookup)
+                .filter(DnsFilterReport::exists)
+                .map(DnsFilterReport::blocking)
+                .filter(blocking -> blocking.size() >= threshold)
+                .findFirst()
+                .map(blocking -> blocking.stream().map(DnsFilterProvider::label).toList())
+                .orElse(List.of());
     }
 
     @Async(AsyncExecutorConfiguration.DNS_FILTER_EXECUTOR)
@@ -153,6 +170,14 @@ public class DefaultDnsFilterCheckService implements DnsFilterCheckService {
             log.warn("Links that could not be checked against the DNS filters failed={}", failed);
         }
         return results;
+    }
+
+    private boolean isChecked(final Url url) {
+        return settingsService.isOn(SettingKey.DNS_FILTER_CHECK) && !linkCheckService.isAllowListed(url.getLongUrl());
+    }
+
+    private static Optional<String> destinationOf(final Url url) {
+        return DomainNames.hostOf(url.getLongUrl()).filter(host -> !DomainNames.isIpLiteral(host));
     }
 
     private List<String> hostsOf(final Url url, final String destination) {
