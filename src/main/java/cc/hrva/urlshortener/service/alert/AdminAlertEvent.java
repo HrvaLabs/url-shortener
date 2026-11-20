@@ -72,6 +72,14 @@ public sealed interface AdminAlertEvent {
 
     }
 
+    record OwnHostBlocked(String host, List<String> filters) implements AdminAlertEvent {
+
+        public OwnHostBlocked {
+            filters = List.copyOf(filters);
+        }
+
+    }
+
     record DomainsSuspended(List<String> domains) implements AdminAlertEvent {
 
         public DomainsSuspended {

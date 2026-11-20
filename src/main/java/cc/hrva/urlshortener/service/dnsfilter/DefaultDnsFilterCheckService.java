@@ -51,6 +51,7 @@ public class DefaultDnsFilterCheckService implements DnsFilterCheckService {
     private final LinkCheckService linkCheckService;
     private final ModerationService moderationService;
     private final ReviewQueueService reviewQueueService;
+    private final OwnHostsCheck ownHostsCheck;
     private final Clock clock;
     private final AtomicBoolean recheckRunning = new AtomicBoolean();
     private final AtomicBoolean sweepRunning = new AtomicBoolean();
@@ -130,6 +131,7 @@ public class DefaultDnsFilterCheckService implements DnsFilterCheckService {
             final var ids = urlRepository.findActiveIds();
             final var results = checkAll(ids);
             log.info("DNS filter sweep finished links={} results={}", ids.size(), results);
+            ownHostsCheck.run();
         } finally {
             sweepRunning.set(false);
         }

@@ -28,6 +28,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainNeedsAttention;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.LinkBlocked;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ReviewOpened;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainsSuspended;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.OwnHostBlocked;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ShapeHeld;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.SettingChanged;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.UserSignedUp;
@@ -572,6 +573,13 @@ class DiscordAlertFormatterTest {
         assertThat(content.lines()).containsExactly(
                 "Abuse reports: Cc changed from reportphishing@apwg.org to cert@cert.pt, abuse\\_desk@x.hr by karlo@hrva.cc",
                 "Abuse reports: your name changed from (email removed) to Karlo by karlo@hrva.cc");
+    }
+
+    @Test
+    void ownHostBlockedLine() {
+        final var content = formatter.message(List.of(new OwnHostBlocked("app.hrva.cc", List.of("Quad9"))), 0).content();
+
+        assertThat(content).isEqualTo("DNS filters block our own host: app.hrva.cc (Quad9). Visitors who use them can't open it.");
     }
 
     @Test

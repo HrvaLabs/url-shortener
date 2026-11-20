@@ -20,6 +20,7 @@ import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainDrift;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainLimitRequested;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainNeedsAttention;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.DomainsSuspended;
+import cc.hrva.urlshortener.service.alert.AdminAlertEvent.OwnHostBlocked;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.LinkBlocked;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.ReviewOpened;
 import cc.hrva.urlshortener.service.alert.AdminAlertEvent.SettingChanged;
@@ -175,6 +176,8 @@ public class DiscordAlertFormatter {
             case SettingChanged changed -> "%s %s by %s".formatted(plain(changed.label()),
                     changed.addresses() ? DiscordText.literal(changed.change()) : plain(changed.change()), DiscordText.literal(changed.changedBy()));
             case DomainsSuspended suspended -> suspendedLine(suspended);
+            case OwnHostBlocked blocked -> "DNS filters block our own host: %s (%s). Visitors who use them can't open it.".formatted(
+                    DiscordText.hostname(blocked.host()), plain(String.join(", ", blocked.filters())));
         };
     }
 

@@ -69,6 +69,9 @@ class DefaultDnsFilterCheckServiceTest {
     @Mock
     private ReviewQueueService reviewQueueService;
 
+    @Mock
+    private OwnHostsCheck ownHostsCheck;
+
     private DnsFilterCheckService service;
 
     private final MutableClock clock = new MutableClock(Instant.parse("2026-11-19T12:00:00Z"));
@@ -77,7 +80,7 @@ class DefaultDnsFilterCheckServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DefaultDnsFilterCheckService(urlRepository, dnsFilterService, settingsService, linkCheckService, moderationService, reviewQueueService, clock);
+        service = new DefaultDnsFilterCheckService(urlRepository, dnsFilterService, settingsService, linkCheckService, moderationService, reviewQueueService, ownHostsCheck, clock);
         lenient().when(urlRepository.findById(LINK_ID)).thenReturn(Optional.of(link));
         lenient().when(settingsService.isOn(SettingKey.DNS_FILTER_CHECK)).thenReturn(true);
         lenient().when(settingsService.number(SettingKey.DNS_FILTERS_TO_BLOCK)).thenReturn(2);
@@ -277,6 +280,7 @@ class DefaultDnsFilterCheckServiceTest {
 
         verify(dnsFilterService).lookup(HOST);
         verify(dnsFilterService).lookup("evil.example");
+        verify(ownHostsCheck).run();
         assertThat(output.getOut()).contains("DNS filter sweep finished links=3 results={BLOCKED=0, FLAGGED=1, CLEAN=1, RETRY=0, SKIPPED=1}");
     }
 
