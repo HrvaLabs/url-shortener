@@ -8,7 +8,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.1.2</version>
+        <version>4.2.0</version>
         <relativePath/>
     </parent>
 
@@ -33,7 +33,7 @@
         <springAiVersion>2.0.2</springAiVersion>
         <mcpSdkVersion>2.2.0</mcpSdkVersion>
         <mcpSecurityVersion>0.1.14</mcpSecurityVersion>
-        <dnsjavaVersion>3.6.3</dnsjavaVersion>
+        <dnsjavaVersion>3.7.1</dnsjavaVersion>
 
         <!-- Newer than Spring Boot 4.1.2 manages; drop each once Boot manages the same or newer -->
         <h2.version>2.5.252</h2.version>
