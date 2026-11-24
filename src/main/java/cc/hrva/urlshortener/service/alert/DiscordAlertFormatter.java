@@ -31,6 +31,7 @@ import cc.hrva.urlshortener.service.digest.WeeklyDigestText;
 import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.EmailAddresses;
+import cc.hrva.urlshortener.util.SignUpMethods;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -63,7 +64,6 @@ public class DiscordAlertFormatter {
     private static final String ROOT_PATH = "/";
     private static final String IP_DESTINATION = "an IP address";
     private static final String UNREADABLE_DESTINATION = "an unreadable destination";
-    private static final String LOCAL_PROVIDER = "local";
     private static final String ARROW = " " + Character.toString(0x2192) + " ";
     private static final int MAX_SAME_SHAPE_EXAMPLES = 3;
     private static final int MAX_SUSPENDED_DOMAINS = 20;
@@ -356,13 +356,7 @@ public class DiscordAlertFormatter {
     }
 
     private static String signUpMethod(final String authProvider) {
-        final var provider = StringUtils.defaultIfBlank(authProvider, LOCAL_PROVIDER).toLowerCase(Locale.ROOT);
-        return switch (provider) {
-            case LOCAL_PROVIDER -> "email";
-            case "google" -> "Google";
-            case "github" -> "GitHub";
-            default -> plain(provider);
-        };
+        return plain(SignUpMethods.of(authProvider));
     }
 
     private String reviewPage(final AlertedLink link) {

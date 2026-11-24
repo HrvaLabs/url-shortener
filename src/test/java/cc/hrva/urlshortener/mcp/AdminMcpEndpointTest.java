@@ -115,7 +115,7 @@ class AdminMcpEndpointTest {
     private static final String ADMIN_EMAIL = "admin@localhost";
     private static final String USER_EMAIL = "user@localhost";
     private static final String MCP_ACCEPT = "application/json, text/event-stream";
-    private static final List<String> MODERATION_TOOLS = List.of("account_links", "block_domain", "block_link", "block_user", "check_url", "delete_link",
+    private static final List<String> MODERATION_TOOLS = List.of("account_links", "account_overview", "block_domain", "block_link", "block_user", "check_url", "delete_link",
             "moderation_summary", "possible_scammers", "review_queue");
     private static final String TOOLS_LIST = """
             {"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""";
@@ -258,7 +258,7 @@ class AdminMcpEndpointTest {
         final List<String> destructive = JsonPath.read(body, "$.result.tools[?(@.annotations.destructiveHint == true)].name");
         assertThat(destructive).containsExactlyInAnyOrder("block_link", "block_domain", "block_user", "delete_link");
         final List<String> readOnly = JsonPath.read(body, "$.result.tools[?(@.annotations.readOnlyHint == true)].name");
-        assertThat(readOnly).containsExactlyInAnyOrder("moderation_summary", "review_queue", "possible_scammers", "check_url", "account_links");
+        assertThat(readOnly).containsExactlyInAnyOrder("moderation_summary", "review_queue", "possible_scammers", "check_url", "account_links", "account_overview");
         final List<Map<String, Object>> blockDomainProperties =
                 JsonPath.read(body, "$.result.tools[?(@.name == 'block_domain')].inputSchema.properties");
         assertThat(blockDomainProperties).singleElement()
