@@ -124,7 +124,7 @@ class UserSpecificationTest {
     }
 
     @Test
-    void theLinkAndClickTotalsAreOneGroupedReadWithZerosLeftOut() {
+    void theLinkAndVisitTotalsAreOneGroupedReadWithZerosLeftOut() {
         givenLinksAndVisits();
         final var ids = List.of(user("karlo@hrva.cc").getId(), user("a%b@").getId(), user("axb@").getId(), user("a_b@").getId());
 
@@ -155,6 +155,15 @@ class UserSpecificationTest {
                 .containsExactly("a%b@example.com", "axb@example.com", "karlo@hrva.cc", "a_b@example.com", "a%%b@example.com");
         assertThat(emailsBy(UserSpecification.orderedBy(Sort.by(Sort.Order.asc("visits"), Sort.Order.desc("id"))), 0, 10))
                 .containsExactly("a_b@example.com", "a%%b@example.com", "axb@example.com", "karlo@hrva.cc", "a%b@example.com");
+    }
+
+    @Test
+    void anAccountWithoutLinksTiesWithAZeroVisitLinkInTheVisitsSort() {
+        link(user("a_b@"), "z1", 0);
+        entityManager.clear();
+
+        assertThat(emailsBy(UserSpecification.orderedBy(Sort.by(Sort.Order.asc("visits"), Sort.Order.desc("id"))), 0, 10))
+                .containsExactly("axb@example.com", "a_b@example.com", "a%b@example.com", "a%%b@example.com", "karlo@hrva.cc");
     }
 
     @Test
