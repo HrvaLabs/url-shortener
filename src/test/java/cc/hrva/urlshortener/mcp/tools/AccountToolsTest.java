@@ -24,6 +24,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -174,13 +175,32 @@ class AccountToolsTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"ACTIVE", " In_Review ", "blocked", "All", "turned_off", "   "})
-    void accountLinksAcceptsStateInAnyCase(final String state) {
+    @CsvSource(delimiter = '|', textBlock = """
+            ACTIVE     | active
+            ' In_Review ' | in review
+            blocked    | blocked
+            turned_off | turned off
+            """)
+    void accountLinksAcceptsStateInAnyCaseAndPrintsIt(final String state, final String words) {
         signedInAs(ADMIN, true);
-        when(userRepository.findById(27L)).thenReturn(Optional.of(SUSPECT));
-        when(urlRepository.findAll(anySpecification(), any(Pageable.class))).thenReturn(new PageImpl<Url>(List.of()));
+        found(SUSPECT, List.of(link(11L, "abc12", "https://evil.example/", "2026-11-03T09:00:00", 1L, null, true)), 1);
+        when(linkReviewRepository.findOpenUrlIds(anyCollection())).thenReturn(List.of());
 
-        assertThat(accountTools.accountLinks(27L, null, state, null, null).isError()).isFalse();
+        final var result = accountTools.accountLinks(27L, null, state, null, null);
+
+        assertThat(result.isError()).isFalse();
+        assertThat(text(result).lines().toList().getFirst()).endsWith("newest first, state " + words + ".");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"All", "   "})
+    void accountLinksTreatsAllAndBlankStateAsNoFilter(final String state) {
+        signedInAs(ADMIN, true);
+        found(SUSPECT, List.of(link(11L, "abc12", "https://evil.example/", "2026-11-03T09:00:00", 1L, null, true)), 1);
+        when(linkReviewRepository.findOpenUrlIds(anyCollection())).thenReturn(List.of());
+
+        assertThat(text(accountTools.accountLinks(27L, null, state, null, null)).lines().toList().getFirst())
+                .isEqualTo("1 link match for r***@gmail.com #27, page 1 of 1, newest first.");
     }
 
     @Test
