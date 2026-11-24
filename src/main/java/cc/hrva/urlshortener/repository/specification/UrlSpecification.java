@@ -1,8 +1,10 @@
 package cc.hrva.urlshortener.repository.specification;
 
 import cc.hrva.urlshortener.model.CampaignLink;
+import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.AccountLinkState;
 import cc.hrva.urlshortener.util.DomainNames;
 import cc.hrva.urlshortener.util.HostName;
 import jakarta.persistence.criteria.CriteriaBuilder;
@@ -41,6 +43,21 @@ public final class UrlSpecification {
             subquery.select(link.get("id").get("urlId"))
                     .where(cb.equal(link.get("id").get("campaignId"), campaignId), cb.equal(link.get("id").get("urlId"), root.get("id")));
             return cb.exists(subquery);
+        };
+    }
+
+    public static Specification<Url> inState(final AccountLinkState state) {
+        return (root, query, cb) -> switch (state) {
+            case ALL -> cb.conjunction();
+            case ACTIVE -> cb.and(cb.isTrue(root.get("active")), root.get("blockReason").isNull());
+            case TURNED_OFF -> cb.and(cb.isFalse(root.get("active")), root.get("blockReason").isNull());
+            case BLOCKED -> root.get("blockReason").isNotNull();
+            case IN_REVIEW -> {
+                final var subquery = query.subquery(Long.class);
+                final var review = subquery.from(LinkReview.class);
+                subquery.select(review.get("id")).where(cb.equal(review.get("url"), root), review.get("resolvedAt").isNull());
+                yield cb.exists(subquery);
+            }
         };
     }
 

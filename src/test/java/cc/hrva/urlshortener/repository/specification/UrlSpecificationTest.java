@@ -1,7 +1,10 @@
 package cc.hrva.urlshortener.repository.specification;
 
+import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
+import cc.hrva.urlshortener.model.enums.AccountLinkState;
+import cc.hrva.urlshortener.model.enums.BlockReason;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDateTime;
@@ -241,6 +244,53 @@ class UrlSpecificationTest {
 
             assertThat(page.getContent().getLast().getShortUrl()).as(direction.name()).isEqualTo("v0DB3");
         }
+    }
+
+    @Test
+    void inStateSplitsAnAccountsLinksIntoActiveTurnedOffBlockedAndInReview() {
+        final var owner = persistUser("account@example.com");
+        final var other = persistUser("other@example.com");
+        persistUrl("on", "https://on.example/", owner);
+        persistUrl("off", "https://off.example/", owner);
+        entityManager.persist(Url.builder().shortUrl("blocked").longUrl("https://blocked.example/").owner(owner).blockReason(BlockReason.DNS_FILTERS).build());
+        final var inReview = persistLink("in-review", owner);
+        final var closedReview = persistLink("closed-review", owner);
+        persistUrl("foreign", "https://foreign.example/", other);
+        entityManager.flush();
+        entityManager.createQuery("update Url u set u.active = false where u.shortUrl = 'off'").executeUpdate();
+        entityManager.persist(LinkReview.builder().url(inReview).reasons("r").flaggedAt(LocalDateTime.of(2026, 11, 1, 9, 0)).build());
+        entityManager.persist(LinkReview.builder().url(closedReview).reasons("r").flaggedAt(LocalDateTime.of(2026, 11, 1, 9, 0))
+                .resolvedAt(LocalDateTime.of(2026, 11, 2, 9, 0)).build());
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(inState(owner, AccountLinkState.ALL)).containsExactly("blocked", "closed-review", "in-review", "off", "on");
+        assertThat(inState(owner, AccountLinkState.ACTIVE)).containsExactly("closed-review", "in-review", "on");
+        assertThat(inState(owner, AccountLinkState.TURNED_OFF)).containsExactly("off");
+        assertThat(inState(owner, AccountLinkState.BLOCKED)).containsExactly("blocked");
+        assertThat(inState(owner, AccountLinkState.IN_REVIEW)).containsExactly("in-review");
+        assertThat(inState(other, AccountLinkState.ALL)).containsExactly("foreign");
+    }
+
+    @Test
+    void searchWithinOneAccountMatchesPercentAndUnderscoreLiterally() {
+        final var owner = persistUser("account@example.com");
+        persistUrl("50_off", "https://a.example/sale", owner);
+        persistUrl("50xoff", "https://a.example/100%25", owner);
+        entityManager.flush();
+
+        assertThat(shortUrls(UrlSpecification.hasOwner(owner).and(UrlSpecification.search("50_")))).containsExactly("50_off");
+        assertThat(shortUrls(UrlSpecification.hasOwner(owner).and(UrlSpecification.search("100%")))).containsExactly("50xoff");
+    }
+
+    private Url persistLink(final String shortUrl, final User owner) {
+        final var url = Url.builder().shortUrl(shortUrl).longUrl("https://" + shortUrl + ".example/").owner(owner).build();
+        entityManager.persist(url);
+        return url;
+    }
+
+    private List<String> inState(final User owner, final AccountLinkState state) {
+        return shortUrls(UrlSpecification.hasOwner(owner).and(UrlSpecification.inState(state)));
     }
 
     @SpringBootConfiguration

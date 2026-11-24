@@ -77,6 +77,13 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     List<Url> findTop10ByCreateDateAfterAndOwnerCreateDateAfterOrderByCreateDateDesc(LocalDateTime createdAfter, LocalDateTime ownerCreatedAfter);
     List<Url> findTop20ByBlockedAtAfterAndBlockReasonNotInOrderByBlockedAtDesc(LocalDateTime blockedAfter, Collection<BlockReason> excludedReasons);
     long countByOwnerAndBlockReasonIsNotNull(User owner);
+    long countByOwner(User owner);
+    long countByOwnerAndActiveTrueAndBlockReasonIsNull(User owner);
+    long countByOwnerAndActiveFalseAndBlockReasonIsNull(User owner);
+
+    @Query("select u.createdVia as via, count(u) as links from Url u where u.owner = :owner and u.createdVia is not null group by u.createdVia")
+    List<CreatedViaCount> countLinksByCreatedVia(@Param("owner") User owner);
+
     long countByBlockReasonIsNotNullAndBlockedAtAfter(LocalDateTime blockedAfter);
     @EntityGraph(attributePaths = {"owner", "domain"}, type = EntityGraph.EntityGraphType.LOAD)
     List<Url> findByOwner(User owner);

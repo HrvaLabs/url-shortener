@@ -21,6 +21,9 @@ public interface LinkReviewRepository extends JpaRepository<LinkReview, Long>, J
     @EntityGraph(attributePaths = {"url", "url.owner", "url.domain"}, type = EntityGraph.EntityGraphType.LOAD)
     Page<LinkReview> findAll(Specification<LinkReview> spec, Pageable pageable);
 
+    @EntityGraph(attributePaths = {"url", "url.domain"})
+    List<LinkReview> findTop10ByUrlOwnerOrderByFlaggedAtDescIdDesc(User owner);
+
     Optional<LinkReview> findFirstByUrlAndResolvedAtIsNullOrderByFlaggedAtDesc(Url url);
     List<LinkReview> findByUrlAndResolvedAtIsNull(Url url);
     List<LinkReview> findByResolvedAtIsNullAndSystemFlaggedTrueAndNoticeFalse();
