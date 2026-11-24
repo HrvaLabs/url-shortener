@@ -1,8 +1,11 @@
 package cc.hrva.urlshortener.mcp.admin;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.mcp.tools.AccountTools;
 import cc.hrva.urlshortener.mcp.tools.McpUserResolver;
 import cc.hrva.urlshortener.mcp.tools.ModerationTools;
+import cc.hrva.urlshortener.repository.BioPageRepository;
+import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
@@ -51,10 +54,12 @@ public class AdminMcpServerConfiguration {
     private final ShortLinks shortLinks;
     private final DnsFilterService dnsFilterService;
     private final SettingsService settingsService;
+    private final CustomDomainRepository customDomainRepository;
+    private final BioPageRepository bioPageRepository;
 
     @Bean
     public AdminMcpTools adminMcpTools() {
-        return new AdminMcpTools(SyncMcpAnnotationProviders.statelessToolSpecifications(List.of(moderationTools())));
+        return new AdminMcpTools(SyncMcpAnnotationProviders.statelessToolSpecifications(List.of(moderationTools(), accountTools())));
     }
 
     @Bean
@@ -81,6 +86,11 @@ public class AdminMcpServerConfiguration {
         return new ModerationTools(mcpUserResolver, moderationService, reviewQueueService, scammerSignalService, linkCheckService,
                 blocklistSourceService, userRepository, urlRepository, linkReviewRepository, appProperties, clock, shortLinks,
                 dnsFilterService, settingsService);
+    }
+
+    private AccountTools accountTools() {
+        return new AccountTools(mcpUserResolver, userRepository, urlRepository, linkReviewRepository, customDomainRepository,
+                bioPageRepository, scammerSignalService, appProperties, shortLinks, clock);
     }
 
     private McpSchema.ServerCapabilities capabilities() {

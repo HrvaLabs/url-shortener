@@ -1,10 +1,8 @@
 package cc.hrva.urlshortener.mcp.tools;
 
-import cc.hrva.urlshortener.security.AdminTwoStep;
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
 import cc.hrva.urlshortener.dto.BlocklistSourceResponse;
 import cc.hrva.urlshortener.dto.LinkVerdict;
-import cc.hrva.urlshortener.exception.NoAuthorizationException;
 import cc.hrva.urlshortener.exception.UrlValidationException;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
@@ -25,7 +23,6 @@ import cc.hrva.urlshortener.service.dnsfilter.DnsFilterService;
 import cc.hrva.urlshortener.service.settings.SettingKey;
 import cc.hrva.urlshortener.service.domain.ShortLinks;
 import cc.hrva.urlshortener.util.DomainNames;
-import cc.hrva.urlshortener.util.EmailAddresses;
 import cc.hrva.urlshortener.util.ReviewReasons;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import java.time.Clock;
@@ -35,10 +32,8 @@ import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,6 +41,11 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.ai.mcp.annotation.McpToolParam;
 import org.springframework.data.domain.PageRequest;
+
+import static cc.hrva.urlshortener.mcp.tools.ModerationText.counted;
+import static cc.hrva.urlshortener.mcp.tools.ModerationText.destination;
+import static cc.hrva.urlshortener.mcp.tools.ModerationText.masked;
+import static cc.hrva.urlshortener.mcp.tools.ModerationText.pageNumber;
 
 @Slf4j
 @RequiredArgsConstructor
@@ -59,15 +59,10 @@ public class ModerationTools {
     private static final String BLOCK_DOMAIN = "block_domain";
     private static final String BLOCK_USER = "block_user";
     private static final String DELETE_LINK = "delete_link";
-    private static final String ROLE_ADMIN = "ROLE_ADMIN";
     private static final String VIA = "mcp";
     private static final int MAX_LINKS = 50;
     private static final int PAGE_SIZE = 20;
-    private static final int MAX_PATH_LENGTH = 80;
     private static final Duration RECENT_BLOCKS = Duration.ofHours(24);
-    private static final Pattern SCHEME = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]*://");
-    private static final Pattern NOT_PLAIN_TEXT = Pattern.compile("[<>\\s\\p{Cntrl}]", Pattern.UNICODE_CHARACTER_CLASS);
-    private static final String ADMINS_ONLY = "Moderation tools are for hrva.cc admins only.";
     private static final String MISSING_URL_ID = "Give the link's urlId, as review_queue shows it.";
     private static final String MISSING_USER_ID = "Give the account's user id, the number after # in review_queue or possible_scammers.";
     private static final String MISSING_URL = "Give the URL to check, for example https://example.com/page.";
@@ -504,16 +499,7 @@ public class ModerationTools {
     }
 
     private User requireAdmin(final String toolName) {
-        final var user = mcpUserResolver.currentUser();
-        if (!userRepository.existsByIdAndAuthoritiesName(user.getId(), ROLE_ADMIN)) {
-            log.info("MCP moderation refused tool={} userId={}", toolName, user.getId());
-            throw new NoAuthorizationException(ADMINS_ONLY);
-        }
-        if (!Boolean.TRUE.equals(user.getTwoStepEnabled())) {
-            log.info("MCP moderation refused, two-step sign-in is off tool={} userId={}", toolName, user.getId());
-            throw new NoAuthorizationException(AdminTwoStep.REQUIRED);
-        }
-        return user;
+        return AdminGate.requireAdmin(mcpUserResolver, userRepository, toolName);
     }
 
     private Optional<String> accountAge(final User user) {
@@ -529,20 +515,6 @@ public class ModerationTools {
 
     private LocalDateTime now() {
         return LocalDateTime.now(clock.withZone(ZoneId.systemDefault()));
-    }
-
-    private static String masked(final User user) {
-        return EmailAddresses.masked(user.getEmail()) + " #" + user.getId();
-    }
-
-    private static String destination(final String longUrl) {
-        final var withoutScheme = SCHEME.matcher(StringUtils.trimToEmpty(longUrl)).replaceFirst("");
-        final var beforeQuery = StringUtils.substringBefore(StringUtils.substringBefore(withoutScheme, "#"), "?");
-        final var pathStart = beforeQuery.indexOf('/');
-        final var authority = pathStart < 0 ? beforeQuery : beforeQuery.substring(0, pathStart);
-        final var host = DomainNames.hostOf(authority).orElse("unknown host");
-        final var path = pathStart < 0 ? "" : StringUtils.abbreviate(plainText(beforeQuery.substring(pathStart)), MAX_PATH_LENGTH);
-        return "<" + host + path + ">";
     }
 
     private static String describeDnsFilters(final DnsFilterReport report) {
@@ -561,10 +533,6 @@ public class ModerationTools {
         };
     }
 
-    private static String plainText(final String path) {
-        return NOT_PLAIN_TEXT.matcher(path).replaceAll(character -> "%%%02X".formatted((int) character.group().charAt(0)));
-    }
-
     private static String blockOf(final LinkVerdict verdict) {
         if (verdict.blockReason() == null) {
             return "";
@@ -579,14 +547,6 @@ public class ModerationTools {
             throw new UrlValidationException(message);
         }
         return id;
-    }
-
-    private static int pageNumber(final Integer page) {
-        return Math.max(0, Objects.requireNonNullElse(page, 0));
-    }
-
-    private static String counted(final long count, final String one, final String many) {
-        return "%d %s".formatted(count, count == 1 ? one : many);
     }
 
 }
