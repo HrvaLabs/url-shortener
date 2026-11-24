@@ -1,10 +1,25 @@
 {
   "releases": [
     {
-      "version": "v2.39.1",
-      "date": "2026-11-20",
+      "version": "v2.39.2",
+      "date": "2026-11-24",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "Failed blocklist downloads are tried again sooner, and the own-host DNS filter alert no longer repeats every night.",
+      "sections": [
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "A blocklist that fails to download is tried again about every 2 hours for up to a day instead of waiting its whole refresh interval, and each download may take up to 3 minutes instead of 1.",
+            "The Discord alert that DNS filters block one of hrva.cc's own hosts, custom domains included, comes when a filter starts blocking it and then about once a week while it stays blocked, instead of every night."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.39.1",
+      "date": "2026-11-20",
       "summary": "The privacy policy names Cloudflare Web Analytics.",
       "sections": [
         {
