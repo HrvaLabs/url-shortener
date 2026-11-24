@@ -544,6 +544,47 @@ class DefaultUserServiceTest {
     }
 
     @Test
+    void eachUserRowCarriesItsLinksAndClicksFromOneGroupedLookup() {
+        final var pageable = PageRequest.of(0, 20);
+        when(userRepository.findAll(newestFirst(pageable)))
+                .thenReturn(new PageImpl<>(List.of(User.builder().id(1L).build(), User.builder().id(2L).build(), User.builder().id(3L).build())));
+        when(urlRepository.totalsOfOwners(List.of(1L, 2L, 3L)))
+                .thenReturn(List.of(new cc.hrva.urlshortener.repository.OwnerUrlTotals(1L, 4L, 120L), new cc.hrva.urlshortener.repository.OwnerUrlTotals(3L, 1L, 0L)));
+
+        final var users = userService.fetchAllUsers(pageable, new UserSearchDto());
+
+        assertThat(users.getContent()).extracting(AdminUserResponse::links, AdminUserResponse::clicks)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(4L, 120L), org.assertj.core.groups.Tuple.tuple(0L, 0L),
+                        org.assertj.core.groups.Tuple.tuple(1L, 0L));
+        verify(urlRepository).totalsOfOwners(any(java.util.Collection.class));
+    }
+
+    @Test
+    void anEditedUserAnswersWithItsLinksAndClicks() {
+        final var edited = UserUpdateDto.builder().id(1L).build();
+        final var existingUser = User.builder().id(1L).authProvider("local").build();
+        when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
+        when(userUpdateDtoToUserConverter.convert(edited)).thenReturn(User.builder().id(1L).build());
+        when(userRepository.save(existingUser)).thenReturn(existingUser);
+        when(urlRepository.totalsOfOwners(List.of(1L))).thenReturn(List.of(new cc.hrva.urlshortener.repository.OwnerUrlTotals(1L, 2L, 9L)));
+
+        final var response = userService.updateUser(edited);
+
+        assertThat(response.links()).isEqualTo(2L);
+        assertThat(response.clicks()).isEqualTo(9L);
+    }
+
+    @Test
+    void sortingTheUserListByLinksOrdersInTheQueryAndLeavesThePageUnsorted() {
+        when(userRepository.findAll(any(Specification.class), eq(PageRequest.of(2, 20)))).thenReturn(Page.empty());
+
+        userService.fetchAllUsers(PageRequest.of(2, 20, Sort.by(Sort.Order.desc("links"))), new UserSearchDto());
+
+        verify(userRepository).findAll(any(Specification.class), eq(PageRequest.of(2, 20)));
+        verify(userRepository, never()).findAll(any(Pageable.class));
+    }
+
+    @Test
     void theUserListWithoutASortComesNewestFirstWithTheIdBreakingTies() {
         when(userRepository.findAll(any(Pageable.class))).thenReturn(Page.empty());
 
@@ -557,7 +598,7 @@ class DefaultUserServiceTest {
     void theUserListRefusesToSortByAFieldOffTheList() {
         assertThatThrownBy(() -> userService.fetchAllUsers(PageRequest.of(0, 20, Sort.by("password")), new UserSearchDto()))
                 .isInstanceOf(InvalidSortException.class)
-                .hasMessage("Sort must be email, createDate, lastLogin or active");
+                .hasMessage("Sort must be email, createDate, lastLogin, active, links or clicks");
         verifyNoInteractions(userRepository);
     }
 

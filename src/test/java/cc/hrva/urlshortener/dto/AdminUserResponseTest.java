@@ -31,7 +31,7 @@ class AdminUserResponseTest {
 
         final JsonNode responseJson = JSON.valueToTree(AdminUserResponse.from(user, Map.of(27L, List.of(GITHUB)), true));
 
-        assertThat(responseJson).isEqualTo(entityJson.put("possibleScammer", true));
+        assertThat(responseJson).isEqualTo(entityJson.put("possibleScammer", true).put("links", 0L).put("clicks", 0L));
         assertThat(responseJson.get("authProvider").asString()).isEqualTo("local");
         assertThat(responseJson.get("signInMethods").toString())
                 .isEqualTo("[{\"method\":\"GITHUB\",\"firstUsedAt\":\"2026-10-20T08:00:00\",\"lastUsedAt\":\"2026-10-28T19:45:00\",\"turnedOffAt\":null}]");
@@ -63,7 +63,7 @@ class AdminUserResponseTest {
         final ObjectNode entityJson = JSON.valueToTree(user);
         entityJson.set("signInMethods", JSON.valueToTree(List.of(GITHUB)));
 
-        assertThat(json).isEqualTo(entityJson);
+        assertThat(json).isEqualTo(entityJson.put("links", 0L).put("clicks", 0L));
         assertThat(json.has("possibleScammer")).isFalse();
     }
 

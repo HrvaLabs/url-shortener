@@ -29,6 +29,7 @@ import cc.hrva.urlshortener.repository.EmailLogRepository;
 import cc.hrva.urlshortener.repository.PasskeyCredentialRepository;
 import cc.hrva.urlshortener.repository.ResetTokenRepository;
 import cc.hrva.urlshortener.repository.TwoFactorRecoveryCodeRepository;
+import cc.hrva.urlshortener.repository.OwnerUrlTotals;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.repository.VerificationTokenRepository;
@@ -55,11 +56,15 @@ import cc.hrva.urlshortener.util.SortWhitelist;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
@@ -78,7 +83,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class DefaultUserService implements UserService {
 
     private static final String CREATE_DATE = "createDate";
-    private static final SortWhitelist USER_SORTS = SortWhitelist.of("email", CREATE_DATE, "lastLogin", "active")
+    private static final SortWhitelist USER_SORTS = SortWhitelist.of("email", CREATE_DATE, "lastLogin", "active", UserSpecification.LINKS, UserSpecification.CLICKS)
             .byDefault(Sort.by(Sort.Order.desc(CREATE_DATE)))
             .thenBy(Sort.Order.desc("id"));
 
@@ -191,11 +196,31 @@ public class DefaultUserService implements UserService {
         }
 
         final var spec = buildSpecification(search, onlyPossibleScammers ? possibleScammers : null);
-        final var users = spec == null ? userRepository.findAll(sorted) : userRepository.findAll(spec, sorted);
+        final var users = usersPage(spec, sorted);
+        final var totals = totalsOf(users.map(User::getId).getContent());
         final var signInMethods = signInMethodService.methodsOf(users.map(User::getId).getContent());
         final var destinationChanges = destinationChangeService.standingsOf(users.getContent());
         return users.map(user -> AdminUserResponse.from(user, signInMethods, possibleScammers.contains(user.getId()))
+                .withTotals(totals.get(user.getId()))
                 .withDestinationChanges(destinationChanges.get(user.getId())));
+    }
+
+    private Page<User> usersPage(final Specification<User> spec, final Pageable sorted) {
+        final var sortsByTotals = sorted.getSort().stream()
+                .anyMatch(order -> UserSpecification.LINKS.equals(order.getProperty()) || UserSpecification.CLICKS.equals(order.getProperty()));
+        if (sortsByTotals) {
+            final var ordered = UserSpecification.orderedBy(sorted.getSort());
+            final var unsorted = sorted.isPaged() ? PageRequest.of(sorted.getPageNumber(), sorted.getPageSize()) : Pageable.unpaged();
+            return userRepository.findAll(spec == null ? ordered : spec.and(ordered), unsorted);
+        }
+        return spec == null ? userRepository.findAll(sorted) : userRepository.findAll(spec, sorted);
+    }
+
+    private Map<Long, OwnerUrlTotals> totalsOf(final List<Long> userIds) {
+        if (userIds.isEmpty()) {
+            return Map.of();
+        }
+        return urlRepository.totalsOfOwners(userIds).stream().collect(Collectors.toMap(OwnerUrlTotals::ownerId, Function.identity()));
     }
 
     private Specification<User> buildSpecification(final UserSearchDto search, final Set<Long> possibleScammers) {
@@ -333,6 +358,7 @@ public class DefaultUserService implements UserService {
         }
 
         return AdminUserResponse.from(updatedUser, signInMethodService.methodsOf(updatedUser.getId()))
+                .withTotals(totalsOf(List.of(updatedUser.getId())).get(updatedUser.getId()))
                 .withDestinationChanges(destinationChangeService.standingOf(updatedUser));
     }
 

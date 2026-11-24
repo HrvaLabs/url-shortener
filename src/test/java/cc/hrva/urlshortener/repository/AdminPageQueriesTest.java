@@ -270,6 +270,17 @@ class AdminPageQueriesTest {
     }
 
     @Test
+    void anAdminUserPageSortedByLinksLoadsEveryUsersLinksAndClicksInOneQuery() {
+        final var users = userRepository.findAll(UserSpecification.orderedBy(Sort.by(Sort.Order.desc("links"), Sort.Order.desc("id"))), PageRequest.of(0, 10));
+        final var totals = urlRepository.totalsOfOwners(users.map(User::getId).getContent());
+
+        assertThat(users.getContent()).hasSize(OWNERS);
+        assertThat(totals).hasSize(OWNERS).allSatisfy(owned -> assertThat(owned.links()).isPositive());
+        assertThat(totals.stream().mapToLong(cc.hrva.urlshortener.repository.OwnerUrlTotals::links).sum()).isEqualTo(9);
+        assertThat(statistics.getPrepareStatementCount()).isEqualTo(2);
+    }
+
+    @Test
     void anAdminUserPageFilteredBySignInMethodLoadsEveryUsersSignInMethodsInOneQuery() {
         withPasswordAndGoogleForEveryUser();
         final var signInMethodService = new DefaultSignInMethodService(userRepository, userSignInMethodRepository);

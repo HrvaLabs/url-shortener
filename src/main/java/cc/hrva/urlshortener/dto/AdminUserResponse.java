@@ -2,6 +2,7 @@ package cc.hrva.urlshortener.dto;
 
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.codebook.Authorities;
+import cc.hrva.urlshortener.repository.OwnerUrlTotals;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -11,6 +12,8 @@ public record AdminUserResponse(
         Long id,
         String email,
         Long apiKeySlots,
+        long links,
+        long clicks,
         List<Authorities> authorities,
         LocalDateTime createDate,
         LocalDateTime lastLogin,
@@ -36,6 +39,8 @@ public record AdminUserResponse(
                 user.getId(),
                 user.getEmail(),
                 user.getApiKeySlots(),
+                0L,
+                0L,
                 user.getAuthorities() == null ? null : List.copyOf(user.getAuthorities()),
                 user.getCreateDate(),
                 user.getLastLogin(),
@@ -49,8 +54,16 @@ public record AdminUserResponse(
                 null);
     }
 
+    public AdminUserResponse withTotals(final OwnerUrlTotals totals) {
+        if (totals == null) {
+            return this;
+        }
+        return new AdminUserResponse(id, email, apiKeySlots, totals.links(), totals.clicks(), authorities, createDate, lastLogin, active, emailVerified,
+                twoFactorEnabled, twoStepEnabled, authProvider, signInMethods, possibleScammer, destinationChanges);
+    }
+
     public AdminUserResponse withDestinationChanges(final DestinationChangeStanding standing) {
-        return new AdminUserResponse(id, email, apiKeySlots, authorities, createDate, lastLogin, active, emailVerified, twoFactorEnabled, twoStepEnabled,
+        return new AdminUserResponse(id, email, apiKeySlots, links, clicks, authorities, createDate, lastLogin, active, emailVerified, twoFactorEnabled, twoStepEnabled,
                 authProvider, signInMethods, possibleScammer, standing);
     }
 

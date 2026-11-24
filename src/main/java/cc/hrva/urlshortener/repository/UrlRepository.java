@@ -95,6 +95,10 @@ public interface UrlRepository extends JpaRepository<Url, Long>, JpaSpecificatio
     @Query("select u.id from Url u where u.active = true and u.createDate >= :from and u.createDate < :to order by u.id")
     List<Long> findActiveIdsCreatedBetween(@Param("from") LocalDateTime from, @Param("to") LocalDateTime to);
 
+    @Query("select new cc.hrva.urlshortener.repository.OwnerUrlTotals(u.owner.id, count(u), coalesce(sum(u.visits), 0L))"
+            + " from Url u where u.owner.id in :ownerIds group by u.owner.id")
+    List<OwnerUrlTotals> totalsOfOwners(@Param("ownerIds") Collection<Long> ownerIds);
+
     @Query("select u.id from Url u where u.id in :ids")
     List<Long> findExistingIds(@Param("ids") Collection<Long> ids);
 

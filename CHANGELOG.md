@@ -13,6 +13,7 @@ Countries now show on a world map.
 
 ### 🔧 Admin
 - The Traffic tab's Countries panel has the same map.
+- The Users list shows each account's links and clicks instead of its API key slots, and can sort by them. Slots stay in Edit.
 
 ---
 
