@@ -593,7 +593,7 @@ class DefaultWeeklyDigestServiceTest {
     private static TrafficStatsResponse traffic(final LocalDate from, final LocalDate to, final long clicks, final long uniqueVisitors,
                                                 final long botClicks, final List<TrafficStatsResponse.TopLink> topLinks) {
         return new TrafficStatsResponse(7, from, to, new AnalyticsTotals(clicks, uniqueVisitors, botClicks), List.of(), 0, clicks,
-                topLinks, new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of(), List.of()), 5000, new BioPageViewTotals(0, 0));
+                topLinks, new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of()), 5000, new BioPageViewTotals(0, 0));
     }
 
     private static LinksStatsResponse links(final LocalDate from, final LocalDate to, final StackedSeries created, final long createdTotal) {

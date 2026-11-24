@@ -6,6 +6,7 @@ import cc.hrva.urlshortener.configuration.JacksonConfiguration;
 import cc.hrva.urlshortener.configuration.SecurityConfiguration;
 import cc.hrva.urlshortener.configuration.WebConfiguration;
 import cc.hrva.urlshortener.dto.AnalyticsTotals;
+import cc.hrva.urlshortener.dto.BreakdownEntry;
 import cc.hrva.urlshortener.dto.UrlAnalyticsDto.Breakdowns;
 import cc.hrva.urlshortener.dto.stats.CacheStats;
 import cc.hrva.urlshortener.dto.stats.LinksStatsResponse;
@@ -189,6 +190,20 @@ class AdminStatsSecurityTest {
     }
 
     @Test
+    void theTrafficTabCarriesTheCountryMap() throws Exception {
+        final var countryMap = List.of(new BreakdownEntry("HR", 9), new BreakdownEntry("DE", 4));
+        when(adminStatsService.traffic(7)).thenReturn(new TrafficStatsResponse(7, LocalDate.of(2026, 10, 20), LocalDate.of(2026, 10, 26),
+                new AnalyticsTotals(0, 0, 0), List.of(), 0, 0, List.of(),
+                new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), countryMap), 0, new BioPageViewTotals(0, 0)));
+
+        mockMvc.perform(tabRequest("traffic", "admin-token").param("days", "7"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.breakdowns.countryMap[0].value").value("HR"))
+                .andExpect(jsonPath("$.breakdowns.countryMap[0].clicks").value(9))
+                .andExpect(jsonPath("$.breakdowns.countryMap[1].value").value("DE"));
+    }
+
+    @Test
     void visitsNeedAdmin() throws Exception {
         when(adminStatsService.visits(30)).thenReturn(new VisitStatsResponse(true, 30, 30, LocalDate.of(2026, 10, 11), LocalDate.of(2026, 11, 9), 480,
                 List.of(new VisitStatsResponse.Source("chatgpt.com", "utm", 13)), List.of(new VisitStatsResponse.Page("/", 300))));
@@ -298,7 +313,7 @@ class AdminStatsSecurityTest {
     }
 
     private static Breakdowns emptyBreakdowns() {
-        return new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+        return new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
     }
 
     private static MockHttpServletRequestBuilder tabRequest(final String tab, final String token) {

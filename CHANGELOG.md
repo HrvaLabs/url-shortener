@@ -4,6 +4,18 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.41] — 2026-11-24
+
+Countries now show on a world map.
+
+### 🔑 Improvements
+- The Countries panel in your link analytics and on the dashboard shows a world map of where clicks come from, with every country, not only the top 10. Point at or tap a country to see its clicks.
+
+### 🔧 Admin
+- The Traffic tab's Countries panel has the same map.
+
+---
+
 ## [v2.40] — 2026-11-24
 
 Admins can look up one account from the admin MCP connector.

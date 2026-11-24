@@ -21,6 +21,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import static cc.hrva.urlshortener.model.enums.StatDimension.COUNTRY;
 import static cc.hrva.urlshortener.model.enums.StatDimension.REFERRER;
 import static cc.hrva.urlshortener.model.enums.StatDimension.SOURCE;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -122,6 +123,20 @@ class TrafficStatsTest {
     }
 
     @Test
+    void countryMapComesThroughTheBreakdownsWithEveryCountry() {
+        final var countries = new ArrayList<BreakdownEntry>();
+        IntStream.range(0, 14).forEach(index -> countries.add(new BreakdownEntry("C" + (char) ('A' + index), 30 - index)));
+        countries.add(new BreakdownEntry("other", 5));
+        when(repository.findBreakdownTotals(FROM, TO)).thenReturn(Map.of(COUNTRY, countries));
+        givenOwnership(0, 0);
+
+        final var breakdowns = trafficStats.collect(WINDOW).breakdowns();
+
+        assertThat(breakdowns.countryMap()).containsExactlyElementsOf(countries.subList(0, 14));
+        assertThat(breakdowns.countries()).hasSize(11);
+    }
+
+    @Test
     void bioPageViewsAreSummedOverTheWindow() {
         givenOwnership(0, 0);
         when(repository.sumBioPageViews(FROM, TO)).thenReturn(new BioPageViewTotals(40, 6));
@@ -144,7 +159,7 @@ class TrafficStatsTest {
         assertThat(traffic.anonymousClicks()).isZero();
         assertThat(traffic.accountClicks()).isZero();
         assertThat(traffic.topLinks()).isEmpty();
-        assertThat(traffic.breakdowns()).isEqualTo(new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of(), List.of()));
+        assertThat(traffic.breakdowns()).isEqualTo(new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of()));
         assertThat(traffic.allTimeVisits()).isZero();
         assertThat(traffic.bioPageViews()).isEqualTo(new BioPageViewTotals(0, 0));
         verify(repository).findDaily(FROM, TO);

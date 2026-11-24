@@ -8,7 +8,9 @@ import cc.hrva.urlshortener.model.enums.StatDimension;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Comparator;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -16,6 +18,7 @@ public final class AnalyticsSeries {
 
     private static final int TOP_VALUES_LIMIT = 10;
     private static final String OTHER = "other";
+    private static final Set<String> UNMAPPED_COUNTRIES = Set.of(OTHER, "unknown", "tor");
 
     private AnalyticsSeries() {}
 
@@ -48,6 +51,13 @@ public final class AnalyticsSeries {
         return List.copyOf(top);
     }
 
+    public static List<BreakdownEntry> countryMap(final Map<StatDimension, List<BreakdownEntry>> breakdowns) {
+        return breakdowns.getOrDefault(StatDimension.COUNTRY, List.of()).stream()
+                .filter(entry -> !UNMAPPED_COUNTRIES.contains(entry.value()))
+                .sorted(Comparator.comparingLong(BreakdownEntry::clicks).reversed().thenComparing(BreakdownEntry::value))
+                .toList();
+    }
+
     public static Breakdowns breakdownsOf(final Map<StatDimension, List<BreakdownEntry>> breakdowns) {
         return new Breakdowns(
                 topValues(breakdowns, StatDimension.REFERRER),
@@ -55,7 +65,8 @@ public final class AnalyticsSeries {
                 topValues(breakdowns, StatDimension.DEVICE),
                 topValues(breakdowns, StatDimension.BROWSER),
                 topValues(breakdowns, StatDimension.OS),
-                topValues(breakdowns, StatDimension.SOURCE));
+                topValues(breakdowns, StatDimension.SOURCE),
+                countryMap(breakdowns));
     }
 
 }

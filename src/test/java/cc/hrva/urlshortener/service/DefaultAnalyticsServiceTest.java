@@ -191,6 +191,7 @@ class DefaultAnalyticsServiceTest {
         assertThat(breakdowns.browsers()).containsExactly(new BreakdownEntry("safari", 3));
         assertThat(breakdowns.operatingSystems()).containsExactly(new BreakdownEntry("ios", 3));
         assertThat(breakdowns.sources()).containsExactly(new BreakdownEntry("direct", 4), new BreakdownEntry("qr", 1));
+        assertThat(breakdowns.countryMap()).containsExactly(new BreakdownEntry("HR", 3), new BreakdownEntry("DE", 2));
     }
 
     @Test
@@ -206,6 +207,7 @@ class DefaultAnalyticsServiceTest {
         assertThat(breakdowns.browsers()).isEmpty();
         assertThat(breakdowns.operatingSystems()).isEmpty();
         assertThat(breakdowns.sources()).isEmpty();
+        assertThat(breakdowns.countryMap()).isEmpty();
     }
 
     @Test
@@ -388,6 +390,7 @@ class DefaultAnalyticsServiceTest {
         assertThat(breakdowns.browsers()).containsExactly(new BreakdownEntry("safari", 3), new BreakdownEntry("chrome", 2));
         assertThat(breakdowns.operatingSystems()).containsExactly(new BreakdownEntry("ios", 3), new BreakdownEntry("android", 2));
         assertThat(breakdowns.sources()).containsExactly(new BreakdownEntry("direct", 4), new BreakdownEntry("qr", 1));
+        assertThat(breakdowns.countryMap()).containsExactly(new BreakdownEntry("HR", 3), new BreakdownEntry("DE", 2));
     }
 
     @Test

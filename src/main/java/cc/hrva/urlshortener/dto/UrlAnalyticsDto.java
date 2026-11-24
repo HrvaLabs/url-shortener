@@ -35,6 +35,7 @@ public record UrlAnalyticsDto(
             List<BreakdownEntry> devices,
             List<BreakdownEntry> browsers,
             List<BreakdownEntry> operatingSystems,
-            List<BreakdownEntry> sources) {}
+            List<BreakdownEntry> sources,
+            List<BreakdownEntry> countryMap) {}
 
 }

@@ -1,10 +1,31 @@
 {
   "releases": [
     {
-      "version": "v2.40",
+      "version": "v2.41",
       "date": "2026-11-24",
       "badge": "Latest",
       "badgeVariant": "default",
+      "summary": "Countries now show on a world map.",
+      "sections": [
+        {
+          "title": "Improvements",
+          "icon": "key",
+          "items": [
+            "The Countries panel in your link analytics and on the dashboard shows a world map of where clicks come from, with every country, not only the top 10. Point at or tap a country to see its clicks."
+          ]
+        },
+        {
+          "title": "Admin",
+          "icon": "wrench",
+          "items": [
+            "The Traffic tab's Countries panel has the same map."
+          ]
+        }
+      ]
+    },
+    {
+      "version": "v2.40",
+      "date": "2026-11-24",
       "summary": "Admins can look up one account from the admin MCP connector.",
       "sections": [
         {

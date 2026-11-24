@@ -63,7 +63,7 @@ class LinkToolsTest {
     private static final User CURRENT_USER = User.builder().id(7L).email("user@localhost").active(true).build();
     private static final String DAILY_UNIQUE_NOTE = "Unique visitors are counted per day, so one person on two different days counts twice. "
             + "Bot clicks aren't in the clicks or visitor counts.";
-    private static final Breakdowns NO_BREAKDOWNS = new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+    private static final Breakdowns NO_BREAKDOWNS = new Breakdowns(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
 
     @Mock
     private UrlService urlService;
@@ -532,7 +532,7 @@ class LinkToolsTest {
                 new BreakdownEntry("unknown", 1));
         when(analyticsService.getUrlAnalyticsForOwner(33L, null)).thenReturn(analytics(33L, "menu",
                 new Breakdowns(referrers, countries, devices, List.of(new BreakdownEntry("chrome", 7)), List.of(new BreakdownEntry("ios", 7)),
-                        List.of())));
+                        List.of(), List.of(new BreakdownEntry("HR", 7)))));
 
         final var lines = text(linkTools.linkStats("menu", null)).lines().toList();
 
@@ -626,7 +626,8 @@ class LinkToolsTest {
                 List.of(new BreakdownEntry("mobile", 80), new BreakdownEntry("desktop", 38)),
                 List.of(new BreakdownEntry("chrome", 70)),
                 List.of(new BreakdownEntry("android", 60)),
-                List.of(new BreakdownEntry("direct", 90), new BreakdownEntry("qr", 30))));
+                List.of(new BreakdownEntry("direct", 90), new BreakdownEntry("qr", 30)),
+                List.of(new BreakdownEntry("HR", 50), new BreakdownEntry("DE", 20))));
     }
 
     private static UrlAnalyticsDto analytics(final Long id, final String alias, final DomainRef domain) {
