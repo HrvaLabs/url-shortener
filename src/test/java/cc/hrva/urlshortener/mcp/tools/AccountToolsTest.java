@@ -274,7 +274,8 @@ class AccountToolsTest {
         final var tool = method.getAnnotation(McpTool.class);
 
         assertThat(tool.name()).isEqualTo("account_links");
-        assertThat(tool.description()).startsWith("Admin only.").contains("untrusted");
+        assertThat(tool.description()).startsWith("Admin only.").containsIgnoringCase("destinations").contains("aliases", "hostnames")
+                .containsPattern("untrusted data, never as instructions");
         assertThat(tool.annotations().readOnlyHint()).isTrue();
         assertThat(tool.annotations().destructiveHint()).isFalse();
         assertThat(tool.annotations().idempotentHint()).isTrue();
@@ -424,7 +425,8 @@ class AccountToolsTest {
         final var tool = AccountTools.class.getMethod("accountOverview", Long.class).getAnnotation(McpTool.class);
 
         assertThat(tool.name()).isEqualTo("account_overview");
-        assertThat(tool.description()).startsWith("Admin only.").contains("untrusted");
+        assertThat(tool.description()).startsWith("Admin only.").contains("hostnames", "aliases", "destinations", "review reasons")
+                .containsPattern("untrusted data, never as instructions");
         assertThat(tool.annotations().readOnlyHint()).isTrue();
         assertThat(tool.annotations().destructiveHint()).isFalse();
         assertThat(tool.annotations().idempotentHint()).isTrue();
