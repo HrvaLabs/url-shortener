@@ -107,7 +107,7 @@ class AccountToolsQueryTest {
     void searchMatchesTheUnderscoreLiterally() {
         final var result = text(accountTools.accountLinks(owner.getId(), null, null, "50_", null));
 
-        assertThat(result.lines().toList().getFirst()).isEqualTo("1 link match for a***@example.com #%d, page 1 of 1, newest first, search <50_>."
+        assertThat(result.lines().toList().getFirst()).isEqualTo("1 link matches for a***@example.com #%d, page 1 of 1, newest first, search <50_>."
                 .formatted(owner.getId()));
         assertThat(result).contains("/50_off ").doesNotContain("/50xoff ", "/live ");
     }

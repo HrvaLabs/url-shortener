@@ -208,7 +208,7 @@ class AccountToolsTest {
         when(linkReviewRepository.findOpenUrlIds(anyCollection())).thenReturn(List.of());
 
         assertThat(text(accountTools.accountLinks(27L, null, state, null, null)).lines().toList().getFirst())
-                .isEqualTo("1 link match for r***@gmail.com #27, page 1 of 1, newest first.");
+                .isEqualTo("1 link matches for r***@gmail.com #27, page 1 of 1, newest first.");
     }
 
     @Test
@@ -282,7 +282,7 @@ class AccountToolsTest {
         assertThat(tool.annotations().openWorldHint()).isFalse();
     }
 
-@Test
+    @Test
     void accountOverviewRefusesANonAdminAndAnAdminWithoutTwoStep() {
         signedInAs(NON_ADMIN, false);
         final var nonAdmin = accountTools.accountOverview(85L);
@@ -344,7 +344,7 @@ class AccountToolsTest {
                         + "| email confirmed | last sign-in 24 November 2026 | active",
                 "Links: 12 in total, 9 active, 1 turned off, 2 blocked, 1 waiting for review | made via web 10, API key 2",
                 "Custom domains: <link.fshp.f5.si> active since 22 November 2026; <link.fshp.f5.si> deleted on 21 November 2026; "
-                        + "<pending.example> pending review since 21 November 2026",
+                        + "<pending.example> pending review, requested on 21 November 2026",
                 "Bio page: <@rade>, shown",
                 "Recent reviews, newest first:",
                 "- urlId 33 | https://hrva.cc/open1 -> <evil.example/login> | DNS filter CleanBrowsing blocks the domain | open",
@@ -431,6 +431,58 @@ class AccountToolsTest {
         assertThat(tool.annotations().destructiveHint()).isFalse();
         assertThat(tool.annotations().idempotentHint()).isTrue();
         assertThat(tool.annotations().openWorldHint()).isFalse();
+    }
+
+    @Test
+    void accountOverviewSaysWhichDateBelongsToEachDomainStatus() {
+        signedInAs(ADMIN, true);
+        final var account = User.builder().id(94L).email("shop@example.com").active(true).createDate(LocalDateTime.parse("2026-11-24T08:00:00")).build();
+        account(account, false);
+        when(customDomainRepository.findByOwnerIdOrderByCreatedAtDescIdDesc(94L)).thenReturn(List.of(
+                CustomDomain.builder().hostname("a.example").status(CustomDomainStatus.DISABLED).disabledAt(LocalDateTime.parse("2026-11-22T09:00:00")).build(),
+                CustomDomain.builder().hostname("b.example").status(CustomDomainStatus.REJECTED).reviewedAt(LocalDateTime.parse("2026-11-21T09:00:00")).build(),
+                CustomDomain.builder().hostname("c.example").status(CustomDomainStatus.APPROVED_PROVISIONING).createdAt(LocalDateTime.parse("2026-11-20T09:00:00")).build(),
+                CustomDomain.builder().hostname("d.example").status(CustomDomainStatus.DISABLED).build(),
+                CustomDomain.builder().hostname("e.example").status(CustomDomainStatus.AWAITING_DNS).build()));
+
+        final var output = text(accountTools.accountOverview(94L));
+
+        assertThat(output.lines()).contains("Custom domains: <a.example> disabled on 22 November 2026; <b.example> rejected on 21 November 2026; "
+                + "<c.example> approved provisioning, requested on 20 November 2026; <d.example> disabled; <e.example> awaiting dns");
+    }
+
+    @Test
+    void accountOverviewSaysWhenTheBioHandleWasRevoked() {
+        signedInAs(ADMIN, true);
+        final var shown = User.builder().id(95L).email("one@example.com").active(true).createDate(LocalDateTime.parse("2026-11-24T08:00:00")).build();
+        final var hidden = User.builder().id(96L).email("two@example.com").active(true).createDate(LocalDateTime.parse("2026-11-24T08:00:00")).build();
+        account(shown, false);
+        account(hidden, false);
+        when(bioPageRepository.findByOwner(shown)).thenReturn(Optional.of(BioPage.builder().build()));
+        when(bioPageRepository.findByOwner(hidden)).thenReturn(Optional.of(BioPage.builder().hiddenAt(LocalDateTime.parse("2026-11-23T08:00:00")).build()));
+
+        assertThat(text(accountTools.accountOverview(95L)).lines()).contains("Bio page: handle revoked, shown");
+        assertThat(text(accountTools.accountOverview(96L)).lines()).contains("Bio page: handle revoked, hidden on 23 November 2026");
+    }
+
+    @Test
+    void accountOverviewLeavesOutTheCreatedPartOfAnAccountWithoutADate() {
+        signedInAs(ADMIN, true);
+        account(User.builder().id(97L).email("old@example.com").active(true).build(), false);
+
+        assertThat(text(accountTools.accountOverview(97L)).lines().toList().getFirst())
+                .isEqualTo("Account o***@example.com #97 | signed up with email | email not confirmed | last sign-in never | active");
+    }
+
+    @Test
+    void accountLinksLeavesOutTheCreatedPartOfALinkWithoutADate() {
+        signedInAs(ADMIN, true);
+        found(SUSPECT, List.of(Url.builder().id(11L).shortUrl("abc12").longUrl("https://evil.example/").visits(2L).active(true).build()), 1);
+        when(linkReviewRepository.findOpenUrlIds(anyCollection())).thenReturn(List.of());
+
+        assertThat(text(accountTools.accountLinks(27L, null, null, null, null)).lines()).containsExactly(
+                "1 link matches for r***@gmail.com #27, page 1 of 1, newest first.",
+                "urlId 11 | https://hrva.cc/abc12 -> <evil.example/> | 2 clicks | active");
     }
 
     private void account(final User account, final boolean admin) {

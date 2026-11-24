@@ -67,7 +67,7 @@
 # Section 14 first checks that admin@localhost, whose two-step sign-in is off, gets the 403 "Turn on two-step sign-in to use admin pages."
 # on an admin page and on GET /api/v1/users while its own /users/me and two-step setting work, then sets two_step_enabled in Postgres, so the
 # same token opens admin pages from then on. Section 14b checks the admin MCP endpoint /mcp/admin: its own 401 and protected resource
-# metadata, a client registered for it, admin@localhost (two-step on) listing and running the ten moderation tools there, a refresh
+# metadata, a client registered for it, admin@localhost (two-step on) listing the ten moderation tools there and running moderation_summary, account_overview and account_links as admin, a refresh
 # without resource keeping the /mcp/admin audience, user@localhost's token refused with 403, /mcp and /mcp/admin tokens refused on each
 # other's endpoint, a /mcp sign-in's refresh asking for /mcp/admin refused (invalid_target), and the MCP Inspector signing in to /mcp/admin
 # on its own. Section 20 reads the reset token from the link in the email (Mailpit's API port is published on a
@@ -852,6 +852,17 @@ expect_eq "$(jq -r '[.result.tools[] | select(.annotations.destructiveHint) | .n
 mcp_post /mcp/admin "$ADMIN_MCP_TOKEN" '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"moderation_summary","arguments":{}}}'
 show "$(jq -r '.result.content[0].text' <<<"$HTTP_BODY")"
 expect_eq "$HTTP_STATUS $(jq -r .result.isError <<<"$HTTP_BODY")" "200 false" "moderation_summary runs as the admin"
+ACCOUNT_TOOLS_USER_ID=$(psql_value "select id from user_account where email = '$USER_EMAIL';")
+mcp_post /mcp/admin "$ADMIN_MCP_TOKEN" "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"account_overview\",\"arguments\":{\"userId\":$ACCOUNT_TOOLS_USER_ID}}}"
+show "$(jq -r '.result.content[0].text' <<<"$HTTP_BODY")"
+expect_eq "$HTTP_STATUS $(jq -r .result.isError <<<"$HTTP_BODY")" "200 false" "account_overview runs as the admin"
+expect_eq "$(jq -r '.result.content[0].text' <<<"$HTTP_BODY" | head -1 | grep -o "#$ACCOUNT_TOOLS_USER_ID |")" "#$ACCOUNT_TOOLS_USER_ID |" \
+    "account_overview starts with the masked account and its id"
+mcp_post /mcp/admin "$ADMIN_MCP_TOKEN" "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"account_links\",\"arguments\":{\"userId\":$ACCOUNT_TOOLS_USER_ID}}}"
+show "$(jq -r '.result.content[0].text' <<<"$HTTP_BODY")"
+expect_eq "$HTTP_STATUS $(jq -r .result.isError <<<"$HTTP_BODY")" "200 false" "account_links runs as the admin"
+expect_eq "$(jq -r '.result.content[0].text' <<<"$HTTP_BODY" | head -1 | grep -c "match.* for .*#$ACCOUNT_TOOLS_USER_ID")" 1 \
+    "account_links answers with its match header for the account"
 http -X POST "$BASE/oauth2/token" \
     --data-urlencode grant_type=refresh_token \
     --data-urlencode "refresh_token=$ADMIN_MCP_REFRESH_TOKEN" \
