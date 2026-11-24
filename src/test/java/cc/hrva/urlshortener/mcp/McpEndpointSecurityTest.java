@@ -21,6 +21,8 @@ import cc.hrva.urlshortener.mcp.tools.LinkTools;
 import cc.hrva.urlshortener.mcp.tools.McpUserResolver;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.CreatedVia;
+import cc.hrva.urlshortener.repository.BioPageRepository;
+import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
@@ -243,6 +245,12 @@ class McpEndpointSecurityTest {
 
     @MockitoBean
     private LinkReviewRepository linkReviewRepository;
+
+    @MockitoBean
+    private CustomDomainRepository customDomainRepository;
+
+    @MockitoBean
+    private BioPageRepository bioPageRepository;
 
     @MockitoBean
     private ModerationService moderationService;

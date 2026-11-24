@@ -1,15 +1,12 @@
-package cc.hrva.urlshortener.mcp.tools;
+package cc.hrva.urlshortener.repository;
 
 import cc.hrva.urlshortener.configuration.properties.AppProperties;
+import cc.hrva.urlshortener.mcp.tools.AccountTools;
+import cc.hrva.urlshortener.mcp.tools.McpUserResolver;
 import cc.hrva.urlshortener.model.LinkReview;
 import cc.hrva.urlshortener.model.Url;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.BlockReason;
-import cc.hrva.urlshortener.repository.BioPageRepository;
-import cc.hrva.urlshortener.repository.CustomDomainRepository;
-import cc.hrva.urlshortener.repository.LinkReviewRepository;
-import cc.hrva.urlshortener.repository.UrlRepository;
-import cc.hrva.urlshortener.repository.UserRepository;
 import cc.hrva.urlshortener.service.ScammerSignalService;
 import cc.hrva.urlshortener.service.domain.ShortLinks;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;

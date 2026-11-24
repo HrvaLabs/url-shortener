@@ -12,6 +12,8 @@ import cc.hrva.urlshortener.mcp.tools.LinkTools;
 import cc.hrva.urlshortener.mcp.tools.ModerationTools;
 import cc.hrva.urlshortener.model.User;
 import cc.hrva.urlshortener.model.enums.CreatedVia;
+import cc.hrva.urlshortener.repository.BioPageRepository;
+import cc.hrva.urlshortener.repository.CustomDomainRepository;
 import cc.hrva.urlshortener.repository.LinkReviewRepository;
 import cc.hrva.urlshortener.repository.UrlRepository;
 import cc.hrva.urlshortener.repository.UserRepository;
@@ -110,7 +112,7 @@ class ModernMcpServersTest {
     private static final String ADMIN_EMAIL = "admin@localhost";
     private static final String SERVER_INFO = "$.result._meta['io.modelcontextprotocol/serverInfo']";
     private static final List<String> LINK_TOOLS = List.of("list_links", "shorten_url", "link_stats");
-    private static final List<String> MODERATION_TOOLS = List.of("block_domain", "block_link", "block_user", "check_url", "delete_link",
+    private static final List<String> MODERATION_TOOLS = List.of("account_links", "account_overview", "block_domain", "block_link", "block_user", "check_url", "delete_link",
             "moderation_summary", "possible_scammers", "review_queue");
     private static final String DISCOVER = """
             {"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}""";
@@ -200,6 +202,12 @@ class ModernMcpServersTest {
 
     @MockitoBean
     private LinkReviewRepository linkReviewRepository;
+
+    @MockitoBean
+    private CustomDomainRepository customDomainRepository;
+
+    @MockitoBean
+    private BioPageRepository bioPageRepository;
 
     @AfterEach
     void signOut() {

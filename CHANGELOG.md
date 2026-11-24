@@ -4,6 +4,15 @@ All notable changes to hrva.cc — the URL shortener.
 
 ---
 
+## [v2.40] — 2026-11-24
+
+Admins can look up one account from the admin MCP connector.
+
+### 🔧 Admin
+- Two new tools on the admin MCP connector: account_overview shows an account's standing, links, custom domains, bio page and recent reviews, and account_links lists its links with filters, search and sorting. Both only read; emails stay masked.
+
+---
+
 ## [v2.39.2] — 2026-11-24
 
 Failed blocklist downloads are tried again sooner, and the own-host DNS filter alert no longer repeats every night.

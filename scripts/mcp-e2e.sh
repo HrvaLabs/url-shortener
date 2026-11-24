@@ -67,7 +67,7 @@
 # Section 14 first checks that admin@localhost, whose two-step sign-in is off, gets the 403 "Turn on two-step sign-in to use admin pages."
 # on an admin page and on GET /api/v1/users while its own /users/me and two-step setting work, then sets two_step_enabled in Postgres, so the
 # same token opens admin pages from then on. Section 14b checks the admin MCP endpoint /mcp/admin: its own 401 and protected resource
-# metadata, a client registered for it, admin@localhost (two-step on) listing and running the eight moderation tools there, a refresh
+# metadata, a client registered for it, admin@localhost (two-step on) listing and running the ten moderation tools there, a refresh
 # without resource keeping the /mcp/admin audience, user@localhost's token refused with 403, /mcp and /mcp/admin tokens refused on each
 # other's endpoint, a /mcp sign-in's refresh asking for /mcp/admin refused (invalid_target), and the MCP Inspector signing in to /mcp/admin
 # on its own. Section 20 reads the reset token from the link in the email (Mailpit's API port is published on a
@@ -790,7 +790,7 @@ section "14b. The admin MCP endpoint: the moderation tools for an admin with two
 ADMIN_RESOURCE=$BASE/mcp/admin
 ADMIN_REDIRECT_URI=http://localhost:53682/callback
 TOOL_NAMES='[.result.tools[].name] | sort | join(",")'
-MODERATION_TOOLS=block_domain,block_link,block_user,check_url,delete_link,moderation_summary,possible_scammers,review_queue
+MODERATION_TOOLS=account_links,account_overview,block_domain,block_link,block_user,check_url,delete_link,moderation_summary,possible_scammers,review_queue
 mcp_post /mcp/admin "" "$INITIALIZE"
 expect_eq "$HTTP_STATUS" 401 "POST /mcp/admin without a token is refused"
 expect_eq "$(header_value www-authenticate)" "Bearer resource_metadata=\"$BASE/.well-known/oauth-protected-resource/mcp/admin\"" \
@@ -846,7 +846,7 @@ expect_eq "$(audience_of "$ADMIN_MCP_TOKEN")" "$ADMIN_RESOURCE" "the token's aud
 mcp_post /mcp/admin "$ADMIN_MCP_TOKEN" "$TOOLS_LIST"
 expect_eq "$HTTP_STATUS" 200 "tools/list on /mcp/admin as the admin"
 show "$(jq -r '.result.tools[] | "\(.name): readOnly=\(.annotations.readOnlyHint) destructive=\(.annotations.destructiveHint) openWorld=\(.annotations.openWorldHint)"' <<<"$HTTP_BODY")"
-expect_eq "$(jq -r "$TOOL_NAMES" <<<"$HTTP_BODY")" "$MODERATION_TOOLS" "the eight moderation tools, and no link tools"
+expect_eq "$(jq -r "$TOOL_NAMES" <<<"$HTTP_BODY")" "$MODERATION_TOOLS" "the ten moderation tools, and no link tools"
 expect_eq "$(jq -r '[.result.tools[] | select(.annotations.destructiveHint) | .name] | sort | join(",")' <<<"$HTTP_BODY")" \
     "block_domain,block_link,block_user,delete_link" "destructiveHint on the blocks and delete_link"
 mcp_post /mcp/admin "$ADMIN_MCP_TOKEN" '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"moderation_summary","arguments":{}}}'
@@ -898,7 +898,7 @@ echo "  --- the MCP Inspector signs in to /mcp/admin on its own, approved by adm
 MCP_E2E_APP_JWT=$ADMIN_JWT PATH="$SCRIPT_DIR/mcp-e2e/fake-browser:$PATH" MCP_AUTO_OPEN_ENABLED=true \
     inspector 120 "$ADMIN_RESOURCE" --transport http --callback-url "http://127.0.0.1:$CALLBACK_PORT/oauth/callback" --method tools/list
 expect_eq "$(jq -r '[.tools[].name] | sort | join(",")' <<<"$INSPECTOR_RESULT")" "$MODERATION_TOOLS" \
-    "the Inspector finds /mcp/admin's metadata, registers, signs in and lists the eight moderation tools"
+    "the Inspector finds /mcp/admin's metadata, registers, signs in and lists the ten moderation tools"
 
 section "14c. MCP 2026-07-28 on /mcp and /mcp/admin (curl): discover, tools/list, empty resources and prompts, tools/call, an unknown method, a legacy initialize, refusals"
 MODERN_VERSION=2026-07-28
