@@ -224,7 +224,7 @@ class DefaultBlocklistSourceServiceTest {
         assertThat(response.listVersion()).isEqualTo(VERSION);
         assertThat(response.domainCount()).isEqualTo(3L);
         assertThat(response.memoryBytes()).isEqualTo(1_234_567L);
-        assertThat(fetcher.requests).containsExactly(new Request(MAIN, null, null, 100L * MEGABYTE, Duration.ofSeconds(60)));
+        assertThat(fetcher.requests).containsExactly(new Request(MAIN, null, null, 100L * MEGABYTE, Duration.ofMinutes(3)));
     }
 
     @Test
@@ -485,6 +485,36 @@ class DefaultBlocklistSourceServiceTest {
         blocklistSourceService.refreshDue();
 
         assertThat(fetcher.requestedUrls()).containsExactly(MAIN);
+    }
+
+    @Test
+    void theHourlyRunRetriesASourceThatLoadedBeforeEveryTwoHoursForADayAfterItsRefreshFails() {
+        final var now = LocalDateTime.now();
+        final var failedTwoHoursAgo = stored(source(1).refreshIntervalHours(24).lastFetchedAt(now.minusHours(2))
+                .lastSuccessAt(now.minusHours(26)).lastError("timed out").build());
+        final var failedAnHourAgo = source(2).url(OTHER).refreshIntervalHours(24).lastFetchedAt(now.minusHours(1))
+                .lastSuccessAt(now.minusHours(25)).lastError("timed out").build();
+        final var fallbackLoadedTwoHoursAgo = source(3).url(OPENPHISH).kind(SourceKind.LINKS).refreshIntervalHours(24)
+                .lastFetchedAt(now.minusHours(2)).lastSuccessAt(now.minusHours(2)).lastError("main: HTTP 503").build();
+        final var hourlyFailed = stored(source(4).url(SECOND_FALLBACK).refreshIntervalHours(1).lastFetchedAt(now.minusMinutes(58))
+                .lastSuccessAt(now.minusHours(2)).lastError("timed out").build());
+        final var neverLoaded = source(5).url(FALLBACK).refreshIntervalHours(24).lastFetchedAt(now.minusHours(3)).lastError("HTTP 404").build();
+        final var failingForMoreThanADay = source(6).url(TRANCO_API).refreshIntervalHours(24).lastFetchedAt(now.minusHours(2))
+                .lastSuccessAt(now.minusHours(51)).lastError("timed out").build();
+        final var weeklyFailingForMoreThanADay = source(7).url("https://lists.example/weekly.txt").refreshIntervalHours(168)
+                .lastFetchedAt(now.minusHours(2)).lastSuccessAt(now.minusHours(194)).lastError("timed out").build();
+        final var sixHourlyFailingForMoreThanSixHours = source(8).url("https://lists.example/six-hourly.txt").refreshIntervalHours(6)
+                .lastFetchedAt(now.minusHours(2)).lastSuccessAt(now.minusHours(15)).lastError("timed out").build();
+        when(blocklistSourceRepository.findByEnabledTrue()).thenReturn(List.of(failedTwoHoursAgo, failedAnHourAgo, fallbackLoadedTwoHoursAgo,
+                hourlyFailed, neverLoaded, failingForMoreThanADay, weeklyFailingForMoreThanADay, sixHourlyFailingForMoreThanSixHours));
+        lenient().when(blocklistStore.exists(anyLong())).thenReturn(true);
+        fetcher.serves(MAIN, LIST);
+        fetcher.serves(SECOND_FALLBACK, LIST);
+        redisHasRoom();
+
+        blocklistSourceService.refreshDue();
+
+        assertThat(fetcher.requestedUrls()).containsExactly(MAIN, SECOND_FALLBACK);
     }
 
     @Test

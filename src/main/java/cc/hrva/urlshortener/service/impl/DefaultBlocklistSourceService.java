@@ -51,6 +51,8 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
     private static final int MAX_NAME_LENGTH = 100;
     private static final int MAX_URL_LENGTH = 1000;
     private static final Duration DUE_TOLERANCE = Duration.ofMinutes(5);
+    private static final Duration FAILED_REFRESH_RETRY = Duration.ofHours(2);
+    private static final Duration MAX_RETRY_WINDOW = Duration.ofDays(1);
 
     private final BlocklistSourceRepository blocklistSourceRepository;
     private final BlocklistStore blocklistStore;
@@ -196,8 +198,23 @@ public class DefaultBlocklistSourceService implements BlocklistSourceService {
 
     private boolean isDue(final BlocklistSource source) {
         final var lastFetchedAt = source.getLastFetchedAt();
-        final var dueAfter = LocalDateTime.now().minusHours(source.getRefreshIntervalHours()).plus(DUE_TOLERANCE);
-        return lastFetchedAt == null || !lastFetchedAt.isAfter(dueAfter) || !blocklistStore.exists(source.getId());
+        return lastFetchedAt == null
+                || !lastFetchedAt.isAfter(LocalDateTime.now().minus(waitAfter(source, lastFetchedAt)).plus(DUE_TOLERANCE))
+                || !blocklistStore.exists(source.getId());
+    }
+
+    private static Duration waitAfter(final BlocklistSource source, final LocalDateTime lastFetchedAt) {
+        final var interval = Duration.ofHours(source.getRefreshIntervalHours());
+        return retriesSoon(source, lastFetchedAt, interval) && interval.compareTo(FAILED_REFRESH_RETRY) > 0 ? FAILED_REFRESH_RETRY : interval;
+    }
+
+    private static boolean retriesSoon(final BlocklistSource source, final LocalDateTime lastFetchedAt, final Duration interval) {
+        final var lastSuccessAt = source.getLastSuccessAt();
+        if (source.getLastError() == null || lastSuccessAt == null || !lastSuccessAt.isBefore(lastFetchedAt)) {
+            return false;
+        }
+        final var retryWindow = interval.compareTo(MAX_RETRY_WINDOW) < 0 ? interval : MAX_RETRY_WINDOW;
+        return lastFetchedAt.isBefore(lastSuccessAt.plus(interval).plus(retryWindow));
     }
 
     private static void forgetLoadedList(final BlocklistSource source) {

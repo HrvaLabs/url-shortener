@@ -102,7 +102,7 @@ class BlocklistRefresherTest {
         blocklistRefresher.refresh(source, RefreshTrigger.MANUAL);
 
         verify(publicHttpFetcher).fetch(eq(API), anyLong(), isNull(), isNull(), any(Duration.class));
-        verify(publicHttpFetcher).fetch(eq(TOP_20000), eq(100L * MEGABYTE), isNull(), isNull(), eq(Duration.ofSeconds(60)));
+        verify(publicHttpFetcher).fetch(eq(TOP_20000), eq(100L * MEGABYTE), isNull(), isNull(), eq(Duration.ofMinutes(3)));
         verify(blocklistStore).replace(TRANCO, Set.of("accounts.google.com", "login.microsoftonline.com", "m.facebook.com"));
         verify(blocklistSourceRepository).recordLoadedList(eq(TRANCO), eq(SourceKind.TOP_SITES), any(), isNull(), eq(TOP_20000), eq(3L), isNull(),
                 isNull(), isNull());
@@ -135,7 +135,7 @@ class BlocklistRefresherTest {
 
         blocklistRefresher.refresh(source, RefreshTrigger.MANUAL);
 
-        verify(publicHttpFetcher).fetch(eq(TOP_1000), eq(100L * MEGABYTE), isNull(), isNull(), eq(Duration.ofSeconds(60)));
+        verify(publicHttpFetcher).fetch(eq(TOP_1000), eq(100L * MEGABYTE), isNull(), isNull(), eq(Duration.ofMinutes(3)));
         verify(blocklistStore).replace(TRANCO, Set.of("google.com", "amazon.de"));
         verify(blocklistSourceRepository).recordLoadedList(eq(TRANCO), eq(SourceKind.BRAND_SITES), any(), isNull(), eq(TOP_1000), eq(2L), isNull(),
                 isNull(), isNull());

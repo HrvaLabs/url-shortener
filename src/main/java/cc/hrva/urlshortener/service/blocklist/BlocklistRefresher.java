@@ -44,7 +44,7 @@ public class BlocklistRefresher {
     private static final long MAX_BYTES = 100L * 1024 * 1024;
     private static final long MAX_API_ANSWER_BYTES = 64L * 1024;
     private static final int MAX_ENTRIES = 5_000_000;
-    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(60);
+    private static final Duration REQUEST_TIMEOUT = Duration.ofMinutes(3);
     private static final String ERROR_SEPARATOR = "; ";
     private static final int MAX_ETAG_LENGTH = 255;
     private static final int MAX_LAST_MODIFIED_LENGTH = 100;
