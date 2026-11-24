@@ -16,7 +16,7 @@ import org.springframework.data.jpa.domain.Specification;
 public final class UserSpecification {
 
     public static final String LINKS = "links";
-    public static final String CLICKS = "clicks";
+    public static final String VISITS = "visits";
 
     private UserSpecification() {}
 
@@ -32,16 +32,16 @@ public final class UserSpecification {
     private static Order orderOf(final Sort.Order order, final Root<User> root, final CriteriaQuery<?> query, final CriteriaBuilder cb) {
         final Expression<?> expression = switch (order.getProperty()) {
             case LINKS -> ownedLinks(root, query, cb, false);
-            case CLICKS -> ownedLinks(root, query, cb, true);
+            case VISITS -> ownedLinks(root, query, cb, true);
             default -> root.get(order.getProperty());
         };
         return order.isAscending() ? cb.asc(expression) : cb.desc(expression);
     }
 
-    private static Expression<Long> ownedLinks(final Root<User> root, final CriteriaQuery<?> query, final CriteriaBuilder cb, final boolean clicks) {
+    private static Expression<Long> ownedLinks(final Root<User> root, final CriteriaQuery<?> query, final CriteriaBuilder cb, final boolean visits) {
         final var owned = query.subquery(Long.class);
         final var url = owned.from(Url.class);
-        owned.select(clicks ? cb.coalesce(cb.sum(url.<Long>get("visits")), 0L) : cb.count(url)).where(cb.equal(url.get("owner"), root));
+        owned.select(visits ? cb.coalesce(cb.sum(url.<Long>get("visits")), 0L) : cb.count(url)).where(cb.equal(url.get("owner"), root));
         return owned;
     }
 

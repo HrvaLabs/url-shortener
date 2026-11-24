@@ -13,7 +13,7 @@ public record AdminUserResponse(
         String email,
         Long apiKeySlots,
         long links,
-        long clicks,
+        long visits,
         List<Authorities> authorities,
         LocalDateTime createDate,
         LocalDateTime lastLogin,
@@ -58,12 +58,12 @@ public record AdminUserResponse(
         if (totals == null) {
             return this;
         }
-        return new AdminUserResponse(id, email, apiKeySlots, totals.links(), totals.clicks(), authorities, createDate, lastLogin, active, emailVerified,
+        return new AdminUserResponse(id, email, apiKeySlots, totals.links(), totals.visits(), authorities, createDate, lastLogin, active, emailVerified,
                 twoFactorEnabled, twoStepEnabled, authProvider, signInMethods, possibleScammer, destinationChanges);
     }
 
     public AdminUserResponse withDestinationChanges(final DestinationChangeStanding standing) {
-        return new AdminUserResponse(id, email, apiKeySlots, links, clicks, authorities, createDate, lastLogin, active, emailVerified, twoFactorEnabled, twoStepEnabled,
+        return new AdminUserResponse(id, email, apiKeySlots, links, visits, authorities, createDate, lastLogin, active, emailVerified, twoFactorEnabled, twoStepEnabled,
                 authProvider, signInMethods, possibleScammer, standing);
     }
 

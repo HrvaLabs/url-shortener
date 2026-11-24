@@ -83,7 +83,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class DefaultUserService implements UserService {
 
     private static final String CREATE_DATE = "createDate";
-    private static final SortWhitelist USER_SORTS = SortWhitelist.of("email", CREATE_DATE, "lastLogin", "active", UserSpecification.LINKS, UserSpecification.CLICKS)
+    private static final SortWhitelist USER_SORTS = SortWhitelist.of("email", CREATE_DATE, "lastLogin", "active", UserSpecification.LINKS, UserSpecification.VISITS)
             .byDefault(Sort.by(Sort.Order.desc(CREATE_DATE)))
             .thenBy(Sort.Order.desc("id"));
 
@@ -207,7 +207,7 @@ public class DefaultUserService implements UserService {
 
     private Page<User> usersPage(final Specification<User> spec, final Pageable sorted) {
         final var sortsByTotals = sorted.getSort().stream()
-                .anyMatch(order -> UserSpecification.LINKS.equals(order.getProperty()) || UserSpecification.CLICKS.equals(order.getProperty()));
+                .anyMatch(order -> UserSpecification.LINKS.equals(order.getProperty()) || UserSpecification.VISITS.equals(order.getProperty()));
         if (sortsByTotals) {
             final var ordered = UserSpecification.orderedBy(sorted.getSort());
             final var unsorted = sorted.isPaged() ? PageRequest.of(sorted.getPageNumber(), sorted.getPageSize()) : Pageable.unpaged();

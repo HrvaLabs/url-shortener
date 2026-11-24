@@ -270,7 +270,7 @@ class AdminPageQueriesTest {
     }
 
     @Test
-    void anAdminUserPageSortedByLinksLoadsEveryUsersLinksAndClicksInOneQuery() {
+    void anAdminUserPageSortedByLinksLoadsEveryUsersLinksAndVisitsInOneQuery() {
         final var users = userRepository.findAll(UserSpecification.orderedBy(Sort.by(Sort.Order.desc("links"), Sort.Order.desc("id"))), PageRequest.of(0, 10));
         final var totals = urlRepository.totalsOfOwners(users.map(User::getId).getContent());
 

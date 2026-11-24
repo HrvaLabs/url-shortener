@@ -109,7 +109,7 @@ class UserSpecificationTest {
         entityManager.flush();
     }
 
-    private void givenLinksAndClicks() {
+    private void givenLinksAndVisits() {
         link(user("karlo@hrva.cc"), "k1", 10);
         link(user("karlo@hrva.cc"), "k2", 5);
         link(user("a%b@"), "p1", 100);
@@ -125,12 +125,12 @@ class UserSpecificationTest {
 
     @Test
     void theLinkAndClickTotalsAreOneGroupedReadWithZerosLeftOut() {
-        givenLinksAndClicks();
+        givenLinksAndVisits();
         final var ids = List.of(user("karlo@hrva.cc").getId(), user("a%b@").getId(), user("axb@").getId(), user("a_b@").getId());
 
         final var totals = urlRepository.totalsOfOwners(ids);
 
-        assertThat(totals).extracting(OwnerUrlTotals::ownerId, OwnerUrlTotals::links, OwnerUrlTotals::clicks)
+        assertThat(totals).extracting(OwnerUrlTotals::ownerId, OwnerUrlTotals::links, OwnerUrlTotals::visits)
                 .containsExactlyInAnyOrder(
                         org.assertj.core.groups.Tuple.tuple(user("karlo@hrva.cc").getId(), 2L, 15L),
                         org.assertj.core.groups.Tuple.tuple(user("a%b@").getId(), 1L, 100L),
@@ -139,7 +139,7 @@ class UserSpecificationTest {
 
     @Test
     void sortingByLinksPutsTheMostLinksFirstAndTheNewestAccountFirstOnTies() {
-        givenLinksAndClicks();
+        givenLinksAndVisits();
 
         assertThat(emailsBy(UserSpecification.orderedBy(Sort.by(Sort.Order.desc("links"), Sort.Order.desc("id"))), 0, 10))
                 .containsExactly("axb@example.com", "karlo@hrva.cc", "a%b@example.com", "a_b@example.com", "a%%b@example.com");
@@ -148,18 +148,18 @@ class UserSpecificationTest {
     }
 
     @Test
-    void sortingByClicksCountsAccountsWithoutLinksAsZero() {
-        givenLinksAndClicks();
+    void sortingByVisitsCountsAccountsWithoutLinksAsZero() {
+        givenLinksAndVisits();
 
-        assertThat(emailsBy(UserSpecification.orderedBy(Sort.by(Sort.Order.desc("clicks"), Sort.Order.desc("id"))), 0, 10))
+        assertThat(emailsBy(UserSpecification.orderedBy(Sort.by(Sort.Order.desc("visits"), Sort.Order.desc("id"))), 0, 10))
                 .containsExactly("a%b@example.com", "axb@example.com", "karlo@hrva.cc", "a_b@example.com", "a%%b@example.com");
-        assertThat(emailsBy(UserSpecification.orderedBy(Sort.by(Sort.Order.asc("clicks"), Sort.Order.desc("id"))), 0, 10))
+        assertThat(emailsBy(UserSpecification.orderedBy(Sort.by(Sort.Order.asc("visits"), Sort.Order.desc("id"))), 0, 10))
                 .containsExactly("a_b@example.com", "a%%b@example.com", "axb@example.com", "karlo@hrva.cc", "a%b@example.com");
     }
 
     @Test
     void theCountSortKeepsPagingTheTotalAndTheOtherFilters() {
-        givenLinksAndClicks();
+        givenLinksAndVisits();
         final var byLinks = UserSpecification.orderedBy(Sort.by(Sort.Order.desc("links"), Sort.Order.desc("id")));
 
         assertThat(emailsBy(byLinks, 1, 2)).containsExactly("a%b@example.com", "a_b@example.com");

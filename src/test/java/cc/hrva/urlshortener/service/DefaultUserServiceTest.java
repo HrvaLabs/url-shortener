@@ -544,7 +544,7 @@ class DefaultUserServiceTest {
     }
 
     @Test
-    void eachUserRowCarriesItsLinksAndClicksFromOneGroupedLookup() {
+    void eachUserRowCarriesItsLinksAndVisitsFromOneGroupedLookup() {
         final var pageable = PageRequest.of(0, 20);
         when(userRepository.findAll(newestFirst(pageable)))
                 .thenReturn(new PageImpl<>(List.of(User.builder().id(1L).build(), User.builder().id(2L).build(), User.builder().id(3L).build())));
@@ -553,14 +553,14 @@ class DefaultUserServiceTest {
 
         final var users = userService.fetchAllUsers(pageable, new UserSearchDto());
 
-        assertThat(users.getContent()).extracting(AdminUserResponse::links, AdminUserResponse::clicks)
+        assertThat(users.getContent()).extracting(AdminUserResponse::links, AdminUserResponse::visits)
                 .containsExactly(org.assertj.core.groups.Tuple.tuple(4L, 120L), org.assertj.core.groups.Tuple.tuple(0L, 0L),
                         org.assertj.core.groups.Tuple.tuple(1L, 0L));
         verify(urlRepository).totalsOfOwners(any(java.util.Collection.class));
     }
 
     @Test
-    void anEditedUserAnswersWithItsLinksAndClicks() {
+    void anEditedUserAnswersWithItsLinksAndVisits() {
         final var edited = UserUpdateDto.builder().id(1L).build();
         final var existingUser = User.builder().id(1L).authProvider("local").build();
         when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
@@ -571,7 +571,7 @@ class DefaultUserServiceTest {
         final var response = userService.updateUser(edited);
 
         assertThat(response.links()).isEqualTo(2L);
-        assertThat(response.clicks()).isEqualTo(9L);
+        assertThat(response.visits()).isEqualTo(9L);
     }
 
     @Test
@@ -598,7 +598,7 @@ class DefaultUserServiceTest {
     void theUserListRefusesToSortByAFieldOffTheList() {
         assertThatThrownBy(() -> userService.fetchAllUsers(PageRequest.of(0, 20, Sort.by("password")), new UserSearchDto()))
                 .isInstanceOf(InvalidSortException.class)
-                .hasMessage("Sort must be email, createDate, lastLogin, active, links or clicks");
+                .hasMessage("Sort must be email, createDate, lastLogin, active, links or visits");
         verifyNoInteractions(userRepository);
     }
 
