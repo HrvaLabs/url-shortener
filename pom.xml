@@ -8,7 +8,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.1.3</version>
+        <version>4.2.0</version>
         <relativePath/>
     </parent>
 
@@ -21,7 +21,7 @@
     <properties>
         <java.version>25</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <springdocVersion>3.2.0</springdocVersion>
+        <springdocVersion>3.2.1</springdocVersion>
         <jsonwebtokenVersion>0.13.0</jsonwebtokenVersion>
         <apacheCommonsVersion>3.22.0</apacheCommonsVersion>
         <commonsIoVersion>2.22.0</commonsIoVersion>
@@ -33,7 +33,7 @@
         <springAiVersion>2.0.2</springAiVersion>
         <mcpSdkVersion>2.2.0</mcpSdkVersion>
         <mcpSecurityVersion>0.1.14</mcpSecurityVersion>
-        <dnsjavaVersion>3.6.3</dnsjavaVersion>
+        <dnsjavaVersion>3.7.1</dnsjavaVersion>
 
         <!-- Newer than Spring Boot 4.1.3 manages; drop each once Boot manages the same or newer -->
         <tomcat.version>11.0.29</tomcat.version>
