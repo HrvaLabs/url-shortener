@@ -1,7 +1,7 @@
 # URL-Shortener Agent Guide
 
 ## Build & Run
-- **Java 25**, **Spring Boot 4.1.2**, **Maven**. No Gradle artifacts.
+- **Java 25**, **Spring Boot 4.1.3** (Tomcat pinned to 11.0.29 in `pom.xml` until Boot manages it), **Maven**. No Gradle artifacts.
 - `.mvn/wrapper/` exists but `mvnw` is missing — use system `mvn`.
 - Entry point: `cc.hrva.urlshortener.UrlShortenerApplication`
 - Local dev:
